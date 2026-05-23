@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SESSION_ENV="${GUIBOT_VNC_SESSION_ENV:-$HOME/.vnc/session.env}"
+SESSION_ENV="${GUIBOT_VNC_SESSION_ENV:-$HOME/.cache/axonbrowser/headless/session.env}"
 if [[ ! -f "$SESSION_ENV" ]]; then
   echo "missing VNC session env: $SESSION_ENV" >&2
   exit 1

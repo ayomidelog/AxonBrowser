@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use crate::{chrome::window as chrome_window, window};
+use crate::window;
 
 use super::{context, focus};
 
@@ -19,22 +19,5 @@ pub async fn press_key(locator_raw: &str, key: &str) -> Result<String> {
 
 pub async fn press_enter(locator_raw: Option<&str>) -> Result<String> {
     let target = locator_raw.unwrap_or("address-bar");
-    match press_key(target, "Return").await {
-        Ok(summary) => Ok(summary),
-        Err(primary_err) => {
-            let browser_window = chrome_window::find_browser_window(None)
-                .or_else(|_| window::find_window_by_title_contains("google chrome"))
-                .with_context(|| {
-                    format!(
-                        "failed to resolve {target:?} for Enter and could not find a browser window fallback"
-                    )
-                })?;
-            let activation_note = context::activate_window_note(&browser_window.id);
-            window::send_key(&browser_window.id, "Return")?;
-            Ok(format!(
-                "pressed Return via browser-window fallback {} ({}, original locator path failed: {})",
-                browser_window.id, activation_note, primary_err
-            ))
-        }
-    }
+    press_key(target, "Return").await
 }

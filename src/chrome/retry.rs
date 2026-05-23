@@ -35,6 +35,8 @@ pub fn is_transient_accessibility_error(message: &str) -> bool {
         "failed to connect to the at-spi accessibility bus",
         "org.freedesktop.dbus.error.noreply",
         "org.freedesktop.dbus.error.disconnected",
+        "org.freedesktop.dbus.error.servicename",
+        "the name :1.",
         "timed out waiting for reply",
         r#"no accessible application or window matched query "chrome""#,
         "no accessible application or window matched any edge query",

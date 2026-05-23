@@ -8,7 +8,7 @@ use crate::{
     selector, window,
 };
 
-const BROWSER_QUERY: &str = "chrome";
+const BROWSER_QUERY_CANDIDATES: &[&str] = &["google chrome", "chromium", "chrome"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChromeLocator {
@@ -93,10 +93,12 @@ pub async fn locate(raw: &str) -> Result<LocatedChromeNode> {
     .await
 }
 
+#[allow(dead_code)]
 pub async fn resolve(locator: ChromeLocator) -> Result<LiveNode> {
     retry::with_transient_retry(|| async { resolve_once(locator).await }).await
 }
 
+#[allow(dead_code)]
 pub async fn resolve_chain_for_testing(chain: &[&str]) -> Result<Vec<LiveNode>> {
     resolve_chain(chain).await
 }
@@ -174,15 +176,29 @@ async fn resolve_chain(chain: &[&str]) -> Result<Vec<LiveNode>> {
         .map(|item| item.to_string())
         .collect::<Vec<_>>();
     let selectors = selector::parse_selector_chain(&raw)?;
-    let query = browser_root_query();
-    let nodes = inspect::resolve(&query, &selectors).await?;
-    scope_nodes_to_active_window(nodes).await
+    let mut last_err = None;
+    for query in browser_root_queries() {
+        match inspect::resolve(&query, &selectors).await {
+            Ok(nodes) => {
+                let scoped = scope_nodes_to_active_window(nodes).await?;
+                if !scoped.is_empty() {
+                    return Ok(scoped);
+                }
+            }
+            Err(err) => last_err = Some(err),
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow!("failed to resolve chrome locator chain")))
 }
 
-fn browser_root_query() -> String {
-    chrome_window::find_browser_window(None)
-        .map(|window| window.name)
-        .unwrap_or_else(|_| BROWSER_QUERY.to_string())
+fn browser_root_queries() -> Vec<String> {
+    let mut queries = Vec::new();
+    if let Ok(window) = chrome_window::find_browser_window(None) {
+        queries.push(window.name);
+    }
+    queries.extend(BROWSER_QUERY_CANDIDATES.iter().map(|value| value.to_string()));
+    queries
 }
 
 async fn choose_by_states(
@@ -216,16 +232,7 @@ async fn scope_nodes_to_active_window(nodes: Vec<LiveNode>) -> Result<Vec<LiveNo
         return Ok(nodes);
     };
 
-    let path_filtered = nodes
-        .iter()
-        .filter(|node| node_belongs_to_window_title(node, &target_window.name))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !path_filtered.is_empty() {
-        return Ok(path_filtered);
-    }
-
-    let mut filtered = Vec::new();
+    let mut id_filtered = Vec::new();
     for node in nodes.iter().cloned() {
         let (screen_x, screen_y) = match inspect::clickable_point(&node).await {
             Ok(point) => point,
@@ -236,15 +243,23 @@ async fn scope_nodes_to_active_window(nodes: Vec<LiveNode>) -> Result<Vec<LiveNo
             Err(_) => continue,
         };
         if matched_window.id == target_window.id {
-            filtered.push(node);
+            id_filtered.push(node);
         }
     }
-
-    if filtered.is_empty() {
-        Ok(nodes)
-    } else {
-        Ok(filtered)
+    if !id_filtered.is_empty() {
+        return Ok(id_filtered);
     }
+
+    let path_filtered = nodes
+        .iter()
+        .filter(|node| node_belongs_to_window_title(node, &target_window.name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !path_filtered.is_empty() {
+        return Ok(path_filtered);
+    }
+
+    Ok(nodes)
 }
 
 fn node_belongs_to_window_title(node: &LiveNode, window_title: &str) -> bool {

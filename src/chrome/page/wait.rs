@@ -246,7 +246,7 @@ async fn wait_for_kind(
             wait_for_browser_fragment("url", &needle, disappear, timeout_ms, poll_ms, || async {
                 chrome_wait::current_url()
                     .await
-                    .map(|value| normalize_fragment(&value))
+                    .map(|value| normalize_fragment(&canonical_browser_url(&value)))
             })
             .await
         }
@@ -552,4 +552,22 @@ fn normalize_text(input: &str) -> String {
 
 fn normalize_fragment(input: &str) -> String {
     normalize_text(input)
+}
+
+fn canonical_browser_url(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("about:")
+        || lower.starts_with("chrome:")
+        || lower.starts_with("file:")
+        || lower.starts_with("data:")
+    {
+        lower
+    } else if let Some(rest) = lower.strip_prefix("http://") {
+        rest.to_string()
+    } else if let Some(rest) = lower.strip_prefix("https://") {
+        rest.to_string()
+    } else {
+        lower
+    }
 }

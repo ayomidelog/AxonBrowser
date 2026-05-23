@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -142,8 +142,7 @@ pub async fn launch_and_wait_with_flavor(
     let profile_dir = prepare_profile_dir(flavor, profile_override)?;
     let log_path = unique_path(flavor.launch_log_prefix(), "log");
     let browser_binary = find_browser_binary(flavor)?;
-    let mut child = spawn_browser(flavor, &browser_binary, &profile_dir, &log_path, &url)?;
-    let pid = child.id();
+    let pid = spawn_browser(flavor, &browser_binary, &profile_dir, &log_path, &url)?;
 
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms.max(15000));
@@ -165,15 +164,6 @@ pub async fn launch_and_wait_with_flavor(
                 width: window_match.width,
                 height: window_match.height,
             });
-        }
-
-        if let Some(status) = child.try_wait()? {
-            bail!(
-                "{} exited before exposing a visible window (status: {}); log: {}",
-                flavor.label(),
-                status,
-                log_path.display()
-            );
         }
 
         if start.elapsed() >= timeout {
@@ -204,7 +194,7 @@ fn spawn_browser(
     profile_dir: &PathBuf,
     log_path: &PathBuf,
     url: &str,
-) -> Result<Child> {
+) -> Result<u32> {
     let stdout = File::create(log_path).with_context(|| {
         format!(
             "failed to create firefox launch log at {}",
@@ -218,7 +208,9 @@ fn spawn_browser(
         )
     })?;
 
-    Command::new(browser_binary)
+    Command::new("setsid")
+        .arg("-f")
+        .arg(browser_binary)
         .env_remove("NO_AT_BRIDGE")
         .env("MOZ_ACCESSIBILITY_FORCE_DISABLED", "0")
         .env(
@@ -233,7 +225,36 @@ fn spawn_browser(
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
-        .with_context(|| format!("failed to launch {browser_binary}"))
+        .with_context(|| format!("failed to detach {browser_binary}"))?;
+
+    find_browser_pid(flavor, profile_dir, url)
+}
+
+fn find_browser_pid(flavor: BrowserFlavor, profile_dir: &PathBuf, url: &str) -> Result<u32> {
+    let profile_text = profile_dir.display().to_string();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        let output = Command::new("pgrep").args(["-af", flavor.label()]).output()?;
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                if !line.contains(&profile_text) || !line.contains(url) {
+                    continue;
+                }
+                if let Some((pid_text, _)) = line.trim().split_once(' ')
+                    && let Ok(pid) = pid_text.parse::<u32>()
+                {
+                    return Ok(pid);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Err(anyhow!(
+        "failed to resolve launched {} pid for profile {}",
+        flavor.label(),
+        profile_text
+    ))
 }
 
 fn find_browser_binary(flavor: BrowserFlavor) -> Result<String> {

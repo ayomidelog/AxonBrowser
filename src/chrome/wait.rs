@@ -4,8 +4,7 @@ use anyhow::{Result, anyhow};
 use tokio::time::sleep;
 
 use crate::{
-    chrome::{locators, retry},
-    live_access,
+    chrome::{devtools, locators, retry},
 };
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
@@ -135,33 +134,28 @@ where
 
 pub async fn current_title() -> Result<String> {
     retry::with_transient_retry(|| async {
-        let node = locators::resolve(locators::ChromeLocator::CurrentTab).await?;
-        let fallback = node.line_label();
-        Ok(node
-            .name
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(fallback))
+        if let Ok(Some(title)) = devtools::current_title() {
+            let trimmed = title.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        Err(anyhow!("could not read chrome title from DevTools page list"))
     })
     .await
 }
 
 pub async fn current_url() -> Result<String> {
     retry::with_transient_retry(|| async {
-        let node = locators::resolve(locators::ChromeLocator::AddressBar).await?;
-        if let Some(text) = live_access::read_text(&node).await? {
-            if !text.is_empty() {
-                return Ok(text);
-            }
-        }
-
-        if let Some(name) = node.name {
-            let trimmed = name.trim();
-            if !trimmed.is_empty() && trimmed != "Address and search bar" {
+        if let Ok(Some(url)) = devtools::current_url() {
+            let trimmed = url.trim();
+            if !trimmed.is_empty() {
                 return Ok(trimmed.to_string());
             }
         }
 
-        Err(anyhow!("could not read chrome address bar text"))
+        Err(anyhow!("could not read chrome URL from DevTools page list"))
     })
     .await
 }

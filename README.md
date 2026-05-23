@@ -11,17 +11,16 @@ iframes, screenshots).
 
 ## Runtime Requirements
 
-- Linux desktop session (X11)
+- Linux with X11 available, or a headless VPS where `axonbrowser` can start its own
+  X11 session
 - Chrome/Chromium, Microsoft Edge, or Firefox
-- AT‑SPI accessibility bus enabled
-- `xdotool`, `wmctrl` (fallback input / window control)
-- `xwd` (X11 window dump, used by screenshot commands)
-- ImageMagick `convert` (XWD→PNG conversion and screenshot cropping)
+- AT-SPI support: `at-spi2-core` and `dbus-x11`
+- X11 helpers: `x11-utils`, `xdotool`, `xclip`
+- ImageMagick (`import` is used for screenshots)
+- `Xvfb` for headless VPS use
 
-On headless machines, `axonbrowser` now auto-bootstraps its own X11 session with
-`Xvfb`, `openbox`, and `x11vnc` when no working `DISPLAY` is available. The
-session is isolated under `~/.cache/axonbrowser/headless` and the VNC server is bound
-to `localhost` on an axonbrowser-owned port.
+Headless sessions are created automatically under `~/.cache/axonbrowser/headless`.
+No VNC server, `openbox`, `wmctrl`, or `xwd` is required.
 
 ---
 
@@ -47,8 +46,8 @@ scripts/install-edge-local.sh
 scripts/install-camoufox.sh
 ```
 
-`scripts/install-runtime-deps.sh` installs the X11/accessibility/runtime
-packages axonbrowser needs. On headless hosts it also installs the VNC/Xvfb pieces.
+`scripts/install-runtime-deps.sh` installs the runtime packages axonbrowser needs.
+On headless hosts it also installs `Xvfb`.
 
 If you install from the release tarball, Rust is not required. Extract the bundle,
 run `scripts/install-axonbrowser.sh`, and then use `axonbrowser --help`.
@@ -62,6 +61,10 @@ run `scripts/install-axonbrowser.sh`, and then use `axonbrowser --help`.
 axonbrowser chrome launch
 axonbrowser chrome goto example.com
 
+# Inspect the current window and capture a screenshot
+axonbrowser chrome current
+axonbrowser chrome screenshot artifacts/chrome.png
+
 # Page interactions
 axonbrowser chrome page find "Heading:Example Domain"
 axonbrowser chrome page click "Button:Sign in"
@@ -74,6 +77,16 @@ axonbrowser edge launch
 axonbrowser firefox launch
 axonbrowser camoufox launch
 axonbrowser firefox goto example.com
+```
+
+### VPS / headless
+
+```bash
+scripts/install-runtime-deps.sh
+cargo build --release
+./target/release/axonbrowser chrome launch google.com
+./target/release/axonbrowser chrome current
+./target/release/axonbrowser chrome screenshot artifacts/google.png
 ```
 
 Run `axonbrowser --help` for the full command tree.

@@ -23,12 +23,28 @@ pub async fn hold(key: &str, duration_ms: u64, locator_raw: Option<&str>) -> Res
     };
 
     let activation_note = context::activate_window_note(&browser_window.id);
-    window::key_down(&browser_window.id, key)?;
+    let key_window = active_or_browser_window(&browser_window)?;
+    window::key_down(&key_window.id, key)?;
     sleep(Duration::from_millis(duration_ms)).await;
-    window::key_up(&browser_window.id, key)?;
+    window::key_up(&key_window.id, key)?;
 
     Ok(format!(
         "held {} in window {} for {}ms ({})",
         key, browser_window.id, duration_ms, activation_note
     ))
+}
+
+fn active_or_browser_window(
+    browser_window: &crate::window::WindowMatch,
+) -> Result<crate::window::WindowMatch> {
+    crate::window::active_window_id()
+        .ok()
+        .and_then(|id| {
+            crate::window::list_visible_windows()
+                .ok()?
+                .into_iter()
+                .find(|window| window.id == id)
+        })
+        .or_else(|| Some(browser_window.clone()))
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve browser window for key hold"))
 }

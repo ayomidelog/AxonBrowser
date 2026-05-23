@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use tokio::time::sleep;
 
-use crate::chrome::window as chrome_window;
+use crate::chrome::{session, window as chrome_window};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChromeLaunchState {
@@ -60,25 +60,28 @@ pub async fn launch_and_wait(
     poll_ms: u64,
 ) -> Result<ChromeLaunchState> {
     let url = normalize_launch_url(initial_url.unwrap_or("about:blank"))?;
+    let profile_dir = prepare_profile_dir(profile_override)?;
+    cleanup_existing_profile_processes(&profile_dir)?;
     let baseline: HashSet<String> = chrome_window::list_browser_windows(None)
         .unwrap_or_default()
         .into_iter()
         .map(|window| window.id)
         .collect();
-
-    let profile_dir = prepare_profile_dir(profile_override)?;
     let log_path = unique_path("axonbrowser-chrome-launch", "log");
     let browser_binary = find_browser_binary()?;
-    let mut child = spawn_browser(&browser_binary, &profile_dir, &log_path, &url)?;
-    let pid = child.id();
+    let pid = spawn_browser(&browser_binary, &profile_dir, &log_path, &url)?;
 
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(poll_ms.max(1));
 
     loop {
-        if let Some(window) = detect_new_window(&baseline)? {
+        if let Some(window) = find_window_for_pid(pid)? {
             let _ = crate::window::activate_window(&window.id);
+            let _ = session::remember_browser_window_target(&window.id);
+            let _ = session::remember_browser_url(&url);
+            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+            let _ = remember_initial_devtools_tab(&url);
             return Ok(ChromeLaunchState {
                 pid,
                 profile: profile_dir.display().to_string(),
@@ -93,16 +96,46 @@ pub async fn launch_and_wait(
             });
         }
 
-        if let Some(status) = child.try_wait()? {
-            let log_note = log_path.display().to_string();
-            bail!(
-                "chrome exited before exposing a visible window (status: {}); log: {}",
-                status,
-                log_note
-            );
+        if let Some(window) = detect_new_window(&baseline)? {
+            let _ = crate::window::activate_window(&window.id);
+            let _ = session::remember_browser_window_target(&window.id);
+            let _ = session::remember_browser_url(&url);
+            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+            let _ = remember_initial_devtools_tab(&url);
+            return Ok(ChromeLaunchState {
+                pid,
+                profile: profile_dir.display().to_string(),
+                log_path: log_path.display().to_string(),
+                url: url.clone(),
+                window_id: window.id,
+                window_title: window.name,
+                x: window.x,
+                y: window.y,
+                width: window.width,
+                height: window.height,
+            });
         }
 
         if start.elapsed() >= timeout {
+            if let Some(window) = chrome_window::list_browser_windows(None)?.into_iter().next() {
+                let _ = crate::window::activate_window(&window.id);
+                let _ = session::remember_browser_window_target(&window.id);
+                let _ = session::remember_browser_url(&url);
+                let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+                let _ = remember_initial_devtools_tab(&url);
+                return Ok(ChromeLaunchState {
+                    pid,
+                    profile: profile_dir.display().to_string(),
+                    log_path: log_path.display().to_string(),
+                    url: url.clone(),
+                    window_id: window.id,
+                    window_title: window.name,
+                    x: window.x,
+                    y: window.y,
+                    width: window.width,
+                    height: window.height,
+                });
+            }
             bail!(
                 "timed out after {}ms waiting for a new chrome window; log: {}",
                 timeout_ms,
@@ -116,6 +149,9 @@ pub async fn launch_and_wait(
 
 fn detect_new_window(baseline: &HashSet<String>) -> Result<Option<crate::window::WindowMatch>> {
     for window in chrome_window::list_browser_windows(None)? {
+        if !is_launch_candidate(&window) {
+            continue;
+        }
         if !baseline.contains(&window.id) {
             return Ok(Some(window));
         }
@@ -123,12 +159,38 @@ fn detect_new_window(baseline: &HashSet<String>) -> Result<Option<crate::window:
     Ok(None)
 }
 
+fn find_window_for_pid(pid: u32) -> Result<Option<crate::window::WindowMatch>> {
+    let output = Command::new("xdotool")
+        .args(["search", "--onlyvisible", "--pid", &pid.to_string(), ".*"])
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let output_text = String::from_utf8_lossy(&output.stdout).to_string();
+    let ids = output_text
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    Ok(chrome_window::list_browser_windows(None)?
+        .into_iter()
+        .find(|window| ids.iter().any(|id| id == &window.id)))
+}
+
+fn is_launch_candidate(window: &crate::window::WindowMatch) -> bool {
+    let normalized = chrome_window::normalize(&window.name);
+    !normalized.contains("clipboard") && window.width >= 200 && window.height >= 120
+}
+
 fn spawn_browser(
     browser_binary: &str,
     profile_dir: &PathBuf,
     log_path: &PathBuf,
     url: &str,
-) -> Result<Child> {
+) -> Result<u32> {
     let stdout = File::create(log_path).with_context(|| {
         format!(
             "failed to create chrome launch log at {}",
@@ -142,13 +204,16 @@ fn spawn_browser(
         )
     })?;
 
-    Command::new(browser_binary)
+    Command::new("setsid")
+        .arg("-f")
+        .arg(browser_binary)
         .arg(format!("--user-data-dir={}", profile_dir.display()))
         .args([
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-search-engine-choice-screen",
             "--force-renderer-accessibility",
+            "--remote-debugging-port=0",
             "--new-window",
             "--window-size=1280,900",
             "--disable-background-networking",
@@ -161,7 +226,106 @@ fn spawn_browser(
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
-        .with_context(|| format!("failed to launch {browser_binary}"))
+        .with_context(|| format!("failed to detach {browser_binary}"))?;
+
+    find_browser_pid(profile_dir, url)
+}
+
+fn find_browser_pid(profile_dir: &PathBuf, url: &str) -> Result<u32> {
+    let profile_arg = chrome_profile_arg(profile_dir);
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        let output = Command::new("pgrep").args(["-af", "chrome"]).output()?;
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                if !line.contains(&profile_arg) || !line.contains(url) {
+                    continue;
+                }
+                if let Some((pid_text, _)) = line.trim().split_once(' ')
+                    && let Ok(pid) = pid_text.parse::<u32>()
+                {
+                    return Ok(pid);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Err(anyhow!(
+        "failed to resolve launched chrome pid for profile {}",
+        profile_dir.display()
+    ))
+}
+
+fn cleanup_existing_profile_processes(profile_dir: &PathBuf) -> Result<()> {
+    let profile_arg = chrome_profile_arg(profile_dir);
+    session::clear_browser_session_state();
+    let output = Command::new("pgrep")
+        .args(["-af", "chrome"])
+        .output()
+        .context("failed to inspect existing chrome processes")?;
+    if output.status.success() {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if !line.contains(&profile_arg) {
+                continue;
+            }
+            let Some((pid_text, _)) = line.trim().split_once(' ') else {
+                continue;
+            };
+            let Ok(pid) = pid_text.parse::<u32>() else {
+                continue;
+            };
+            let _ = terminate_pid(pid);
+        }
+    }
+
+    for name in [
+        "DevToolsActivePort",
+        "SingletonCookie",
+        "SingletonLock",
+        "SingletonSocket",
+    ] {
+        let path = profile_dir.join(name);
+        if path.exists() {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn chrome_profile_arg(profile_dir: &PathBuf) -> String {
+    format!("--user-data-dir={}", profile_dir.display())
+}
+
+fn terminate_pid(pid: u32) -> Result<()> {
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(2) {
+        let alive = Command::new("sh")
+            .args(["-lc", &format!("kill -0 {pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !alive {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    Ok(())
 }
 
 fn find_browser_binary() -> Result<String> {
@@ -222,6 +386,14 @@ fn normalize_launch_url(raw: &str) -> Result<String> {
         return Ok(trimmed.to_string());
     }
     Ok(format!("https://{}", trimmed))
+}
+
+fn remember_initial_devtools_tab(url: &str) -> Result<()> {
+    if let Some(page) = crate::chrome::devtools::current_page_with_hint(None, Some(url))? {
+        let _ = session::remember_browser_tab_target(&page.id);
+        let _ = session::remember_browser_url(&page.url);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -9,19 +9,17 @@ elif ! xdpyinfo >/dev/null 2>&1; then
 fi
 
 packages=(
+  at-spi2-core
   dbus-x11
   imagemagick
   python3-venv
-  wmctrl
   x11-utils
   xclip
   xdotool
-  x11vnc
 )
 
 if (( need_headless )); then
   packages+=(
-    openbox
     xvfb
   )
 fi

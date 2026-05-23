@@ -41,17 +41,22 @@ pub async fn press_enter(scope: &PageScope, raw_selectors: &[String]) -> Result<
         return press_enter_active_window("page press-enter with no selectors");
     }
 
+    let target = PageActionTarget::resolve(scope, raw_selectors).await?;
+    if target.node.role.eq_ignore_ascii_case("push button") {
+        let click_summary = click_target_node(&target.node, &target.label, &target.path).await?;
+        return Ok(format!(
+            "activated {} via click fallback ({}) | {}",
+            target.label, target.path, click_summary
+        ));
+    }
+
     let focus_summary = focus::focus(scope, raw_selectors, None).await?;
     let enter_summary = press_enter_active_window("page press-enter after focusing selector")?;
     Ok(format!("{} | {}", focus_summary, enter_summary))
 }
 
 fn press_enter_active_window(context_label: &str) -> Result<String> {
-    let browser_window = chrome_window::find_browser_window(None)
-        .or_else(|_| window::find_window_by_title_contains("google chrome"))
-        .ok();
-
-    if let Some(window_match) = browser_window.as_ref() {
+    if let Ok(window_match) = chrome_window::find_browser_window(None) {
         let activation_note = context::activate_window_note(&window_match.id);
         window::send_key(&window_match.id, "Return").with_context(|| {
             format!(

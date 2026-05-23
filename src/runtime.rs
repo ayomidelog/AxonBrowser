@@ -8,12 +8,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 
 const DISPLAY_CANDIDATES: std::ops::RangeInclusive<u16> = 99..=110;
 const XVFB_SCREEN: &str = "1440x900x24";
 const WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const WAIT_POLL: Duration = Duration::from_millis(200);
+const SESSION_ENV_NAME: &str = "session.env";
+const HEADLESS_SESSION_DIR_ENV: &str = "GUIBOT_HEADLESS_SESSION_DIR";
+const VNC_SESSION_ENV_ENV: &str = "GUIBOT_VNC_SESSION_ENV";
+const HEADLESS_MODE_ENV: &str = "GUIBOT_HEADLESS";
+const ATSPI_SOCKET_PATH: &str = "/run/user/1000/at-spi/bus";
 
 pub fn bootstrap_headless_session() -> Result<()> {
     if has_working_display(None) {
@@ -33,79 +38,70 @@ struct HeadlessSession {
 }
 
 fn start_session() -> Result<HeadlessSession> {
-    ensure_commands([
-        "Xvfb",
-        "xdpyinfo",
-        "dbus-launch",
-        "openbox",
-        "x11vnc",
-    ])?;
+    ensure_commands(["Xvfb", "xdpyinfo", "dbus-launch", "dbus-send"])?;
 
     let dir = session_dir()?;
-    let display_number = choose_display_number()?;
-    let display = format!(":{display_number}");
+    for display_number in DISPLAY_CANDIDATES {
+        let display = format!(":{display_number}");
+        if display_is_usable(&display) {
+            continue;
+        }
 
-    let xvfb_log = dir.join("xvfb.log");
-    let openbox_log = dir.join("openbox.log");
-    let vnc_log = dir.join("x11vnc.log");
+        reclaim_display(display_number)?;
 
-    let xvfb_pid = spawn_logged(
-        "Xvfb",
-        &[
-            &display,
-            "-screen",
-            "0",
-            XVFB_SCREEN,
-            "-ac",
-            "-nolisten",
-            "tcp",
-        ],
-        &xvfb_log,
-        None,
-    )?;
-    write_pid_file(&dir.join("xvfb.pid"), xvfb_pid)?;
-    wait_for_display(&display)?;
+        let xvfb_log = dir.join(format!("xvfb-{display_number}.log"));
 
-    let mut env = base_session_env(&display);
-    let dbus_env = launch_dbus_session()?;
-    env.extend(dbus_env);
+        let xvfb_pid = spawn_logged(
+            "Xvfb",
+            &[
+                &display,
+                "-screen",
+                "0",
+                XVFB_SCREEN,
+                "-ac",
+                "-nolisten",
+                "tcp",
+                "-noreset",
+            ],
+            &xvfb_log,
+            None,
+        )?;
+        write_pid_file(&dir.join("xvfb.pid"), xvfb_pid)?;
 
-    let openbox_pid = spawn_logged("openbox", &[], &openbox_log, Some(&env))?;
-    write_pid_file(&dir.join("openbox.pid"), openbox_pid)?;
+        if wait_for_display(&display).is_err() {
+            let _ = cleanup_session_outputs(&dir);
+            continue;
+        }
 
-    let vnc_port = 5900u16 + display_number;
-    let vnc_port_text = vnc_port.to_string();
-    let x11vnc_pid = spawn_logged(
-        "x11vnc",
-        &[
-            "-display",
-            &display,
-            "-forever",
-            "-shared",
-            "-localhost",
-            "-nopw",
-            "-rfbport",
-            &vnc_port_text,
-        ],
-        &vnc_log,
-        Some(&env),
-    )?;
-    write_pid_file(&dir.join("x11vnc.pid"), x11vnc_pid)?;
+        let mut env = base_session_env(&display);
+        let dbus_env = launch_dbus_session()?;
+        env.extend(dbus_env);
 
-    env.insert("GUIBOT_HEADLESS".to_string(), "1".to_string());
-    env.insert(
-        "GUIBOT_HEADLESS_SESSION_DIR".to_string(),
-        dir.display().to_string(),
-    );
-    env.insert("GUIBOT_VNC_PORT".to_string(), vnc_port_text);
+        env.insert(HEADLESS_MODE_ENV.to_string(), "1".to_string());
+        env.insert(HEADLESS_SESSION_DIR_ENV.to_string(), dir.display().to_string());
+        env.insert(
+            VNC_SESSION_ENV_ENV.to_string(),
+            dir.join(SESSION_ENV_NAME).display().to_string(),
+        );
+        if let Some(runtime_dir) = default_xdg_runtime_dir() {
+            env.insert("XDG_RUNTIME_DIR".to_string(), runtime_dir);
+        }
 
-    persist_env(&dir.join("session.env"), &env)?;
+        let _ = warm_accessibility_bus(&env, &dir);
 
-    Ok(HeadlessSession { env })
+        persist_env(&dir.join(SESSION_ENV_NAME), &env)?;
+
+        return Ok(HeadlessSession { env });
+    }
+
+    bail!(
+        "could not start a usable X11 session in {:?}",
+        DISPLAY_CANDIDATES
+    )
 }
 
 fn load_persisted_session() -> Result<Option<HeadlessSession>> {
-    let env_path = session_dir()?.join("session.env");
+    let env_path = session_env_path()?;
     if !env_path.exists() {
         return Ok(None);
     }
@@ -115,10 +111,11 @@ fn load_persisted_session() -> Result<Option<HeadlessSession>> {
         return Ok(None);
     }
 
-    if has_working_display(Some(&env)) {
+    if session_is_usable(&env) {
         return Ok(Some(HeadlessSession { env }));
     }
 
+    cleanup_persisted_session()?;
     Ok(None)
 }
 
@@ -180,18 +177,27 @@ fn has_working_display(env_override: Option<&BTreeMap<String, String>>) -> bool 
         .unwrap_or(false)
 }
 
-fn choose_display_number() -> Result<u16> {
-    for display in DISPLAY_CANDIDATES {
-        let socket = PathBuf::from(format!("/tmp/.X11-unix/X{display}"));
-        if !socket.exists() {
-            return Ok(display);
+fn session_is_usable(env: &BTreeMap<String, String>) -> bool {
+    if !has_working_display(Some(env)) {
+        return false;
+    }
+
+    if let Some(dir) = env.get(HEADLESS_SESSION_DIR_ENV) {
+        if !pid_file_is_alive(Path::new(dir).join("xvfb.pid").as_path()) {
+            return false;
         }
     }
 
-    Err(anyhow!(
-        "could not find a free X11 display in {:?}",
-        DISPLAY_CANDIDATES
-    ))
+    if let Some(pid) = env.get("DBUS_SESSION_BUS_PID") {
+        let Ok(pid) = pid.parse::<u32>() else {
+            return false;
+        };
+        if !process_is_alive(pid) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn wait_for_display(display: &str) -> Result<()> {
@@ -210,6 +216,58 @@ fn wait_for_display(display: &str) -> Result<()> {
     }
 
     bail!("timed out waiting for X11 display {display} to become ready")
+}
+
+fn display_is_usable(display: &str) -> bool {
+    Command::new("xdpyinfo")
+        .arg("-display")
+        .arg(display)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn reclaim_display(display_number: u16) -> Result<()> {
+    let socket = PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
+    let lock = PathBuf::from(format!("/tmp/.X{display_number}-lock"));
+    if socket.exists() {
+        let _ = fs::remove_file(&socket);
+    }
+    if lock.exists() {
+        let _ = fs::remove_file(&lock);
+    }
+    Ok(())
+}
+
+fn cleanup_session_outputs(dir: &Path) -> Result<()> {
+    for name in ["xvfb.pid", "atspi-bus.pid"] {
+        let path = dir.join(name);
+        if path.exists() {
+            let _ = kill_pid_from_file(&path);
+            let _ = fs::remove_file(&path);
+        }
+    }
+    let env_path = dir.join(SESSION_ENV_NAME);
+    if env_path.exists() {
+        if let Ok(env) = parse_env_file(&env_path) {
+            if let Some(pid) = env
+                .get("DBUS_SESSION_BUS_PID")
+                .and_then(|value| value.parse::<u32>().ok())
+            {
+                let _ = terminate_pid(pid);
+            }
+        }
+    }
+    let _ = terminate_accessibility_processes();
+    let _ = fs::remove_file(dir.join(SESSION_ENV_NAME));
+    Ok(())
+}
+
+fn cleanup_persisted_session() -> Result<()> {
+    let dir = session_dir()?;
+    cleanup_session_outputs(&dir)
 }
 
 fn launch_dbus_session() -> Result<BTreeMap<String, String>> {
@@ -270,6 +328,224 @@ fn base_session_env(display: &str) -> BTreeMap<String, String> {
     env
 }
 
+fn default_xdg_runtime_dir() -> Option<String> {
+    std::env::var("XDG_RUNTIME_DIR").ok().or_else(|| {
+        let output = Command::new("id").arg("-u").output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if uid.is_empty() {
+            None
+        } else {
+            Some(format!("/run/user/{uid}"))
+        }
+    })
+}
+
+fn warm_accessibility_bus(env: &BTreeMap<String, String>, dir: &Path) -> Result<()> {
+    let _ = terminate_accessibility_processes();
+
+    let status = Command::new("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.a11y.Bus",
+            "--type=method_call",
+            "--print-reply",
+            "/org/a11y/bus",
+            "org.freedesktop.DBus.Properties.Set",
+            "string:org.a11y.Status",
+            "string:IsEnabled",
+            "variant:boolean:true",
+        ])
+        .env_clear()
+        .envs(env)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("failed to enable AT-SPI accessibility on the session bus")?;
+    if !status.success() {
+        bail!("failed to enable AT-SPI accessibility on the session bus");
+    }
+
+    let status = Command::new("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.a11y.Bus",
+            "--type=method_call",
+            "--print-reply",
+            "/org/a11y/bus",
+            "org.freedesktop.DBus.Properties.Set",
+            "string:org.a11y.Status",
+            "string:ScreenReaderEnabled",
+            "variant:boolean:true",
+        ])
+        .env_clear()
+        .envs(env)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .context("failed to enable AT-SPI screen reader mode on the session bus")?;
+    if !status.success() {
+        bail!("failed to enable AT-SPI screen reader mode on the session bus");
+    }
+
+    if let Some(registryd) = accessibility_registry_binary() {
+        let pid = spawn_logged(
+            &registryd,
+            &["--use-gnome-session"],
+            &dir.join("atspi-bus.log"),
+            Some(env),
+        )?;
+        write_pid_file(&dir.join("atspi-bus.pid"), pid)?;
+    }
+
+    wait_for_accessibility_bus(env)
+}
+
+pub fn repair_accessibility_stack() -> Result<()> {
+    let dir = session_dir()?;
+    let mut env = BTreeMap::new();
+    for key in [
+        "DISPLAY",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "DBUS_SESSION_BUS_PID",
+        "XDG_SESSION_TYPE",
+        "NO_AT_BRIDGE",
+        "GTK_MODULES",
+        "QT_LINUX_ACCESSIBILITY_ALWAYS_ON",
+        "ACCESSIBILITY_ENABLED",
+        "GNOME_ACCESSIBILITY",
+        "HOME",
+        "XDG_RUNTIME_DIR",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            env.insert(key.to_string(), value);
+        }
+    }
+    if !env.contains_key("DISPLAY") || !env.contains_key("DBUS_SESSION_BUS_ADDRESS") {
+        bail!("cannot repair AT-SPI stack without DISPLAY and DBUS_SESSION_BUS_ADDRESS");
+    }
+    warm_accessibility_bus(&env, &dir)
+}
+
+fn accessibility_bus_is_usable(env: &BTreeMap<String, String>) -> bool {
+    if let Ok(Some(address)) = query_accessibility_bus_address(env) {
+        return ping_dbus_address(env, &address);
+    }
+    false
+}
+
+fn wait_for_accessibility_bus(env: &BTreeMap<String, String>) -> Result<()> {
+    let start = Instant::now();
+    while start.elapsed() < WAIT_TIMEOUT {
+        if accessibility_bus_is_usable(env) {
+            return Ok(());
+        }
+        thread::sleep(WAIT_POLL);
+    }
+    bail!("timed out waiting for the AT-SPI accessibility bus to become usable")
+}
+
+fn query_accessibility_bus_address(env: &BTreeMap<String, String>) -> Result<Option<String>> {
+    let output = Command::new("dbus-send")
+        .args([
+            "--session",
+            "--dest=org.a11y.Bus",
+            "--type=method_call",
+            "--print-reply",
+            "/org/a11y/bus",
+            "org.a11y.Bus.GetAddress",
+        ])
+        .env_clear()
+        .envs(env)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .output()
+        .context("failed to query AT-SPI bus address")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("string \"")
+            && let Some(value) = value.strip_suffix('"')
+        {
+            return Ok(Some(value.to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
+fn ping_dbus_address(env: &BTreeMap<String, String>, address: &str) -> bool {
+    Command::new("dbus-send")
+        .arg(format!("--bus={address}"))
+        .args([
+            "--dest=org.freedesktop.DBus",
+            "--type=method_call",
+            "--print-reply",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus.ListNames",
+        ])
+        .env_clear()
+        .envs(env)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn terminate_accessibility_processes() -> Result<()> {
+    for pattern in [
+        "dbus-daemon --config-file=/usr/share/defaults/at-spi2/accessibility.conf",
+        "at-spi2-registryd --use-gnome-session",
+    ] {
+        let output = Command::new("pgrep")
+            .args(["-af", pattern])
+            .output()
+            .with_context(|| format!("failed to inspect accessibility processes for {pattern}"))?;
+        if !output.status.success() {
+            continue;
+        }
+
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let Some((pid_text, _)) = line.trim().split_once(' ') else {
+                continue;
+            };
+            let Ok(pid) = pid_text.parse::<u32>() else {
+                continue;
+            };
+            let _ = terminate_pid(pid);
+        }
+    }
+
+    let socket = PathBuf::from(ATSPI_SOCKET_PATH);
+    if socket.exists() {
+        let _ = fs::remove_file(socket);
+    }
+    Ok(())
+}
+
+fn accessibility_registry_binary() -> Option<String> {
+    for candidate in ["/usr/libexec/at-spi2-registryd", "at-spi2-registryd"] {
+        if candidate.starts_with('/') {
+            if Path::new(candidate).exists() {
+                return Some(candidate.to_string());
+            }
+            continue;
+        }
+        if command_exists(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 fn apply_env(env: &BTreeMap<String, String>) {
     for (key, value) in env {
         unsafe {
@@ -284,42 +560,79 @@ fn spawn_logged(
     log_path: &Path,
     env_override: Option<&BTreeMap<String, String>>,
 ) -> Result<u32> {
-    let log_path = log_path.display().to_string();
-    let command = shell_escape(command);
-    let args = args
-        .iter()
-        .map(|arg| shell_escape(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let shell_script = format!(
-        "nohup {command}{space}{args} >>{log} 2>&1 </dev/null & echo $!",
-        space = if args.is_empty() { "" } else { " " },
-        log = shell_escape(&log_path),
-    );
+    let stdout = File::options()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .with_context(|| format!("failed to open log file {}", log_path.display()))?;
+    let stderr = stdout.try_clone().with_context(|| {
+        format!(
+            "failed to clone log handle for background command {}",
+            log_path.display()
+        )
+    })?;
 
-    let mut cmd = Command::new("sh");
-    cmd.args(["-lc", &shell_script])
+    let mut cmd = Command::new("setsid");
+    cmd.arg("-f")
+        .arg(command)
+        .args(args)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
     if let Some(env) = env_override {
+        cmd.env_clear();
         cmd.envs(env);
+        cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
     }
 
-    let output = cmd
-        .spawn()
-        .with_context(|| format!("failed to start background command {command}"))?
-        .wait_with_output()
-        .with_context(|| format!("failed waiting for background command shell {command}"))?;
-    let pid = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u32>()
-        .with_context(|| format!("failed to parse background pid for {command}"))?;
-    Ok(pid)
+    cmd.spawn()
+        .with_context(|| format!("failed to detach background command {command}"))?;
+
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        if let Some(pid) = find_background_pid(command, args, env_override)? {
+            return Ok(pid);
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    bail!("failed to resolve detached pid for {command}")
 }
 
-fn shell_escape(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
+fn find_background_pid(
+    command: &str,
+    args: &[&str],
+    env_override: Option<&BTreeMap<String, String>>,
+) -> Result<Option<u32>> {
+    let output = Command::new("pgrep")
+        .arg("-af")
+        .arg(command)
+        .output()
+        .with_context(|| format!("failed to query detached pid for {command}"))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let display_filter = env_override.and_then(|env| env.get("DISPLAY")).cloned();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let trimmed = line.trim();
+        let Some((pid_text, cmdline)) = trimmed.split_once(' ') else {
+            continue;
+        };
+        if !args.iter().all(|arg| cmdline.contains(arg)) {
+            continue;
+        }
+        if let Some(display) = display_filter.as_deref() {
+            if !cmdline.contains(display) {
+                continue;
+            }
+        }
+        if let Ok(pid) = pid_text.parse::<u32>() {
+            return Ok(Some(pid));
+        }
+    }
+
+    Ok(None)
 }
 
 fn persist_env(path: &Path, env: &BTreeMap<String, String>) -> Result<()> {
@@ -352,4 +665,62 @@ fn parse_env_file(path: &Path) -> Result<BTreeMap<String, String>> {
 fn write_pid_file(path: &Path, pid: u32) -> Result<()> {
     fs::write(path, pid.to_string())
         .with_context(|| format!("failed to write pid file {}", path.display()))
+}
+
+fn session_env_path() -> Result<PathBuf> {
+    Ok(session_dir()?.join(SESSION_ENV_NAME))
+}
+
+fn pid_file_is_alive(path: &Path) -> bool {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(pid) = raw.trim().parse::<u32>() else {
+        return false;
+    };
+    process_is_alive(pid)
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    Command::new("sh")
+        .args(["-lc", &format!("kill -0 {pid}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn kill_pid_from_file(path: &Path) -> Result<()> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read pid file {}", path.display()))?;
+    let pid = raw
+        .trim()
+        .parse::<u32>()
+        .with_context(|| format!("invalid pid in {}", path.display()))?;
+    terminate_pid(pid)?;
+    Ok(())
+}
+
+fn terminate_pid(pid: u32) -> Result<()> {
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(2) {
+        if !process_is_alive(pid) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    Ok(())
 }

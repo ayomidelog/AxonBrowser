@@ -69,7 +69,8 @@ async fn main() -> Result<()> {
                     edge::screenshot::ScreenshotMode::Window
                 };
                 let summary =
-                    edge::screenshot::capture_mode(&inner.output, inner.query.as_deref(), mode)?;
+                    edge::screenshot::capture_mode(&inner.output, inner.query.as_deref(), mode)
+                        .await?;
                 println!("{}", summary);
             }
             EdgeCommands::Resize(inner) => {
@@ -460,7 +461,8 @@ async fn main() -> Result<()> {
                                 &inner.output,
                                 None,
                                 edge::screenshot::ScreenshotMode::Window,
-                            )?;
+                            )
+                            .await?;
                             format!(
                                 "edge page screenshot fallback to window capture: {} | reason: {}",
                                 fallback_summary, err
@@ -547,7 +549,12 @@ async fn main() -> Result<()> {
                     firefox::screenshot::ScreenshotMode::Window
                 };
                 let summary =
-                    firefox::screenshot::capture_mode(&inner.output, inner.query.as_deref(), mode)?;
+                    firefox::screenshot::capture_mode(
+                        &inner.output,
+                        inner.query.as_deref(),
+                        mode,
+                    )
+                    .await?;
                 println!("{}", summary);
             }
             FirefoxCommands::Resize(inner) => {
@@ -922,7 +929,8 @@ async fn main() -> Result<()> {
                                 &inner.output,
                                 None,
                                 firefox::screenshot::ScreenshotMode::Window,
-                            )?;
+                            )
+                            .await?;
                             format!(
                                 "firefox page screenshot fallback to window capture: {} | reason: {}",
                                 fallback_summary, err
@@ -995,7 +1003,8 @@ async fn main() -> Result<()> {
                     chrome::screenshot::ScreenshotMode::Window
                 };
                 let summary =
-                    chrome::screenshot::capture_mode(&inner.output, inner.query.as_deref(), mode)?;
+                    chrome::screenshot::capture_mode(&inner.output, inner.query.as_deref(), mode)
+                        .await?;
                 println!("{}", summary);
             }
             ChromeCommands::Resize(inner) => {
@@ -1046,7 +1055,16 @@ async fn main() -> Result<()> {
             ChromeCommands::Back => println!("{}", chrome::actions::click("back").await?),
             ChromeCommands::Forward => println!("{}", chrome::actions::click("forward").await?),
             ChromeCommands::Reload => println!("{}", chrome::actions::click("reload").await?),
-            ChromeCommands::NewTab => println!("{}", chrome::actions::click("new-tab").await?),
+            ChromeCommands::NewTab => {
+                let summary = chrome::goto::navigate(
+                    "about:blank",
+                    true,
+                    chrome::wait::default_timeout_ms(),
+                    chrome::wait::default_poll_ms(),
+                )
+                .await?;
+                println!("{}", summary);
+            }
             ChromeCommands::Option(inner) => {
                 let summary = chrome::options::choose(
                     map_browser_option_prompt(inner.prompt),

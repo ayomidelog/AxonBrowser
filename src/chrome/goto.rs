@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 use tokio::time::sleep;
 
-use crate::chrome::{actions, wait};
+use crate::chrome::{devtools, session, wait};
 
 pub async fn navigate(
     raw_url: &str,
@@ -13,17 +13,15 @@ pub async fn navigate(
 ) -> Result<String> {
     let url = normalize_url(raw_url)?;
 
-    let tab_summary = if new_tab {
-        Some(actions::click("new-tab").await?)
-    } else {
-        None
-    };
-
     let title_before = wait::current_title().await.ok();
     let url_before = wait::current_url().await.ok();
-
-    let type_summary = actions::type_text("address-bar", &url).await?;
-    let enter_summary = actions::press_enter(Some("address-bar")).await?;
+    let navigation = if new_tab {
+        let page = devtools::new_page(&url).await?;
+        format!("devtools created target {} for {:?}", page.id, url)
+    } else {
+        let page = devtools::navigate(&url, title_before.as_deref(), url_before.as_deref()).await?;
+        format!("devtools navigated target {} to {:?}", page.id, url)
+    };
     let page_change = wait_for_page_change(
         title_before.as_deref(),
         url_before.as_deref(),
@@ -32,16 +30,12 @@ pub async fn navigate(
         poll_ms,
     )
     .await?;
+    let _ = session::remember_browser_url(&url);
 
-    Ok(match tab_summary {
-        Some(tab_summary) => format!(
-            "chrome goto {:?} in new tab | {} | {} | {} | {}",
-            url, tab_summary, type_summary, enter_summary, page_change
-        ),
-        None => format!(
-            "chrome goto {:?} | {} | {} | {}",
-            url, type_summary, enter_summary, page_change
-        ),
+    Ok(if new_tab {
+        format!("chrome goto {:?} in new tab | {} | {}", url, navigation, page_change)
+    } else {
+        format!("chrome goto {:?} | {} | {}", url, navigation, page_change)
     })
 }
 
@@ -54,7 +48,7 @@ pub async fn wait_for_page_change(
 ) -> Result<String> {
     let title_baseline = title_before.map(str::to_owned);
     let url_baseline = url_before.map(str::to_owned);
-    let expected_url = expected_url.map(normalize_observed_url);
+    let expected_url = expected_url.map(canonical_browser_url);
 
     if title_baseline.is_none() && url_baseline.is_none() && expected_url.is_none() {
         bail!("could not capture a baseline page title or URL before navigation")
@@ -71,7 +65,7 @@ pub async fn wait_for_page_change(
         let current_url = wait::current_url().await.ok();
 
         if let (Some(expected), Some(after)) = (expected_url.as_deref(), current_url.as_deref()) {
-            if normalize_observed_url(after) == expected {
+            if canonical_browser_url(after) == expected {
                 return Ok(format!(
                     "chrome url reached {:?} after {}ms ({} attempts)",
                     after,
@@ -94,7 +88,7 @@ pub async fn wait_for_page_change(
         }
 
         if let (Some(before), Some(after)) = (url_baseline.as_deref(), current_url.as_deref()) {
-            if after != before {
+            if canonical_browser_url(after) != canonical_browser_url(before) {
                 return Ok(format!(
                     "chrome url changed from {:?} to {:?} after {}ms ({} attempts)",
                     before,
@@ -120,17 +114,21 @@ pub async fn wait_for_page_change(
     }
 }
 
-fn normalize_observed_url(raw: &str) -> String {
+fn canonical_browser_url(raw: &str) -> String {
     let trimmed = raw.trim();
-    if trimmed.contains("://")
-        || trimmed.starts_with("about:")
-        || trimmed.starts_with("chrome:")
-        || trimmed.starts_with("file:")
-        || trimmed.starts_with("data:")
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("about:")
+        || lower.starts_with("chrome:")
+        || lower.starts_with("file:")
+        || lower.starts_with("data:")
     {
-        trimmed.to_string()
+        lower
+    } else if let Some(rest) = lower.strip_prefix("http://") {
+        rest.to_string()
+    } else if let Some(rest) = lower.strip_prefix("https://") {
+        rest.to_string()
     } else {
-        format!("http://{}", trimmed)
+        lower
     }
 }
 
@@ -155,7 +153,7 @@ fn normalize_url(raw_url: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_observed_url, normalize_url};
+    use super::{canonical_browser_url, normalize_url};
 
     #[test]
     fn prefixes_https_for_bare_hosts() {
@@ -174,8 +172,8 @@ mod tests {
     #[test]
     fn normalizes_observed_address_bar_urls() {
         assert_eq!(
-            normalize_observed_url("127.0.0.1:8124/index.html?run=abc"),
-            "http://127.0.0.1:8124/index.html?run=abc"
+            canonical_browser_url("127.0.0.1:8124/index.html?run=abc"),
+            "127.0.0.1:8124/index.html?run=abc"
         );
     }
 }

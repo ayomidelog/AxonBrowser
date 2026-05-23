@@ -26,9 +26,7 @@ pub async fn resolve(query: &str, selectors: &[Selector]) -> Result<Vec<LiveNode
 pub async fn inspect_live(root: &LiveNode) -> Result<UiNode> {
     ensure_accessibility_enabled().await?;
 
-    let connection = AccessibilityConnection::new()
-        .await
-        .context("failed to connect to the AT-SPI accessibility bus")?;
+    let connection = connect_accessibility().await?;
     let accessible = root
         .object_ref
         .as_accessible_proxy(connection.connection())
@@ -47,9 +45,7 @@ pub async fn resolve_within_scope(
 }
 
 pub async fn descendants(scope: &LiveNode) -> Result<Vec<LiveNode>> {
-    let connection = AccessibilityConnection::new()
-        .await
-        .context("failed to connect to the AT-SPI accessibility bus")?;
+    let connection = connect_accessibility().await?;
 
     let mut nodes = Vec::new();
     collect_descendants(scope, connection.connection(), &mut nodes).await?;
@@ -70,9 +66,7 @@ pub async fn component_extents(node: &LiveNode) -> Result<(i32, i32, i32, i32)> 
 }
 
 pub async fn read_state_set(node: &LiveNode) -> Result<atspi::StateSet> {
-    let connection = AccessibilityConnection::new()
-        .await
-        .context("failed to connect to the AT-SPI accessibility bus")?;
+    let connection = connect_accessibility().await?;
     let accessible = node
         .object_ref
         .as_accessible_proxy(connection.connection())
@@ -87,9 +81,7 @@ pub async fn read_state_set(node: &LiveNode) -> Result<atspi::StateSet> {
 async fn resolve_root(query: &str) -> Result<LiveNode> {
     ensure_accessibility_enabled().await?;
 
-    let connection = AccessibilityConnection::new()
-        .await
-        .context("failed to connect to the AT-SPI accessibility bus")?;
+    let connection = connect_accessibility().await?;
 
     let registry = connection
         .root_accessible_on_registry()
@@ -163,6 +155,19 @@ async fn ensure_accessibility_enabled() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn connect_accessibility() -> Result<AccessibilityConnection> {
+    match AccessibilityConnection::new().await {
+        Ok(connection) => Ok(connection),
+        Err(_) => {
+            crate::runtime::repair_accessibility_stack()
+                .context("failed to repair the AT-SPI accessibility stack")?;
+            AccessibilityConnection::new()
+                .await
+                .context("failed to connect to the AT-SPI accessibility bus")
+        }
+    }
 }
 
 #[async_recursion]

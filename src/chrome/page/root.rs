@@ -9,7 +9,7 @@ use crate::{
 
 const PAGE_ROOT_CHAINS: &[&[&str]] = &[&["Document Web"], &["Root Web Area"]];
 const FRAME_ROLE_CANDIDATES: &[&str] = &["Frame", "Internal Frame"];
-const CHROME_BROWSER_QUERIES: &[&str] = &["chrome", "google chrome", "chromium"];
+const CHROME_BROWSER_QUERIES: &[&str] = &["google chrome", "chromium", "chromium-browser"];
 const EDGE_BROWSER_QUERIES: &[&str] = &[
     "edge",
     "microsoft edge",
@@ -179,9 +179,17 @@ async fn resolve_chain(chain: &[&str]) -> Result<Vec<LiveNode>> {
 fn browser_root_queries() -> Vec<String> {
     let mut queries = Vec::new();
     if let Ok(window) = chrome_window::find_browser_window(None) {
-        queries.push(window.name);
+        queries.push(window.name.clone());
+        if let Some(application) = window.name.split(" - ").next() {
+            let trimmed = application.trim();
+            if !trimmed.is_empty() {
+                queries.push(trimmed.to_string());
+            }
+        }
     }
     queries.extend(current_browser_root_queries().iter().map(|q| q.to_string()));
+    queries.sort();
+    queries.dedup();
     queries
 }
 
@@ -190,16 +198,7 @@ async fn scope_nodes_to_browser_window(nodes: Vec<LiveNode>) -> Result<Vec<LiveN
         return Ok(nodes);
     };
 
-    let path_filtered = nodes
-        .iter()
-        .filter(|node| node_belongs_to_window_title(node, &target_window.name))
-        .cloned()
-        .collect::<Vec<_>>();
-    if !path_filtered.is_empty() {
-        return Ok(path_filtered);
-    }
-
-    let mut filtered = Vec::new();
+    let mut id_filtered = Vec::new();
     for node in nodes.iter().cloned() {
         let (screen_x, screen_y) = match inspect::clickable_point(&node).await {
             Ok(point) => point,
@@ -210,15 +209,23 @@ async fn scope_nodes_to_browser_window(nodes: Vec<LiveNode>) -> Result<Vec<LiveN
             Err(_) => continue,
         };
         if matched_window.id == target_window.id {
-            filtered.push(node);
+            id_filtered.push(node);
         }
     }
-
-    if filtered.is_empty() {
-        Ok(Vec::new())
-    } else {
-        Ok(filtered)
+    if !id_filtered.is_empty() {
+        return Ok(id_filtered);
     }
+
+    let path_filtered = nodes
+        .iter()
+        .filter(|node| node_belongs_to_window_title(node, &target_window.name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !path_filtered.is_empty() {
+        return Ok(path_filtered);
+    }
+
+    Ok(Vec::new())
 }
 
 fn current_browser_root_queries() -> &'static [&'static str] {

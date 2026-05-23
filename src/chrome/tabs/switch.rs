@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 
-use crate::chrome::actions;
+use crate::chrome::devtools;
 
 use super::{
     model::{TabInfo, resolve_tabs_with_current},
@@ -24,17 +24,12 @@ pub async fn switch(target: TabSwitchTarget) -> Result<String> {
         ));
     }
 
-    let summary = actions::click::click_target_node(
-        &target.node,
-        &format!("Page Tab: {:?}", target.title),
-        &target.node.path.join(" > "),
-    )
-    .await?;
-    let recovered = recovery::wait_for_current_tab(target.index, 4_000, 150).await?;
+    devtools::activate_page(&target.id).await?;
+    let recovered = recovery::wait_for_current_tab(&target.id, 4_000, 150).await?;
 
     Ok(format!(
-        "switched to chrome tab {} ({:?}) | {} | settled on {:?}",
-        target.index, target.title, summary, recovered.title
+        "switched to chrome tab {} ({:?}) | settled on {:?}",
+        target.index, target.title, recovered.title
     ))
 }
 
@@ -77,26 +72,14 @@ fn resolve_by_title_contains<'a>(tabs: &'a [TabInfo], needle: &str) -> Result<&'
 
 #[cfg(test)]
 mod tests {
-    use atspi::ObjectRefOwned;
-
-    use crate::model::LiveNode;
-
     use super::{TabSwitchTarget, resolve_target};
     use crate::chrome::tabs::model::TabInfo;
 
     fn fake_tab(index: usize, title: &str, is_current: bool) -> TabInfo {
         TabInfo {
             index,
+            id: format!("target-{index}"),
             title: title.into(),
-            node: LiveNode {
-                object_ref: ObjectRefOwned::from_static_str_unchecked(
-                    "org.a11y.atspi.Registry",
-                    "/org/a11y/atspi/accessible/null",
-                ),
-                role: "Page Tab".into(),
-                name: Some(title.into()),
-                path: vec![format!("Page Tab: {title}")],
-            },
             is_current,
         }
     }

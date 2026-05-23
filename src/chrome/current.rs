@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::chrome::{retry, tabs, wait, window as chrome_window};
+use crate::chrome::{retry, session, tabs, wait};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChromeCurrentState {
@@ -23,16 +23,20 @@ pub async fn read(json: bool) -> Result<String> {
 
 pub async fn snapshot() -> Result<ChromeCurrentState> {
     retry::with_transient_retry(|| async {
-        let window = chrome_window::find_browser_window(None)?;
         let tabs = tabs::model::resolve_tabs_with_current().await?;
         let current = tabs
             .iter()
             .find(|tab| tab.is_current)
             .cloned()
             .unwrap_or_else(|| tabs[0].clone());
+        let window_title = if current.title.trim().is_empty() {
+            "Google Chrome".to_string()
+        } else {
+            format!("{} - Google Chrome", current.title)
+        };
 
         Ok(ChromeCurrentState {
-            window_title: window.name,
+            window_title,
             current_tab_title: current.title,
             current_tab_index: current.index,
             tab_count: tabs.len(),
@@ -66,7 +70,7 @@ pub fn render_json(state: &ChromeCurrentState) -> Result<String> {
 async fn read_current_url() -> String {
     match wait::current_url().await {
         Ok(url) => url,
-        Err(_) => "<unavailable>".to_string(),
+        Err(_) => session::read_browser_url().unwrap_or_else(|| "<unavailable>".to_string()),
     }
 }
 

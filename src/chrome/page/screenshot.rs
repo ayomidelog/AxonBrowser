@@ -17,7 +17,7 @@ pub async fn capture(
     nth: Option<usize>,
 ) -> Result<String> {
     if raw_selectors.is_empty() {
-        return screenshot::capture(output_path, None);
+        return screenshot::capture(output_path, None).await;
     }
 
     let target = PageActionTarget::resolve_nth(scope, raw_selectors, nth).await?;
@@ -46,7 +46,7 @@ pub async fn capture(
 
     let tmp = temp_png_path();
     let tmp_str = tmp.to_string_lossy().to_string();
-    screenshot::capture(&tmp_str, Some(&browser_window.name))?;
+    screenshot::capture(&tmp_str, Some(&browser_window.name)).await?;
 
     if let Some(parent) = Path::new(output_path)
         .parent()

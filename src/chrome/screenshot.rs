@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result, anyhow};
 
-use super::window;
+use super::{devtools, window};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ScreenshotMode {
@@ -10,15 +10,32 @@ pub enum ScreenshotMode {
     Active,
 }
 
-pub fn capture(output_path: &str, query_override: Option<&str>) -> Result<String> {
-    capture_mode(output_path, query_override, ScreenshotMode::Window)
+pub async fn capture(output_path: &str, query_override: Option<&str>) -> Result<String> {
+    capture_mode(output_path, query_override, ScreenshotMode::Window).await
 }
 
-pub fn capture_mode(
+pub async fn capture_mode(
     output_path: &str,
     query_override: Option<&str>,
     mode: ScreenshotMode,
 ) -> Result<String> {
+    if matches!(mode, ScreenshotMode::Window)
+        && query_override.is_none()
+        && let Ok(bytes) = devtools::capture_screenshot().await
+    {
+        let output = Path::new(output_path);
+
+        if let Some(parent) = output.parent().filter(|path| !path.as_os_str().is_empty()) {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create output directory {}", parent.display())
+            })?;
+        }
+
+        fs::write(output, bytes)
+            .with_context(|| format!("failed to write screenshot {}", output.display()))?;
+        return Ok(format!("saved {} from Chrome DevTools page target", output.display()));
+    }
+
     let browser_window = match mode {
         ScreenshotMode::Window => window::find_browser_window(query_override)?,
         ScreenshotMode::Active => {
@@ -36,40 +53,16 @@ pub fn capture_mode(
             .with_context(|| format!("failed to create output directory {}", parent.display()))?;
     }
 
-    let xwd = std::process::Command::new("xwd")
-        .args(["-silent", "-id", &browser_window.id])
+    let capture = std::process::Command::new("import")
+        .args(["-window", &browser_window.id, output_path])
         .output()
-        .with_context(|| format!("failed to run xwd for window {}", browser_window.id))?;
+        .context("failed to run import")?;
 
-    if !xwd.status.success() {
+    if !capture.status.success() {
         return Err(anyhow!(
-            "xwd failed for window {}: {}",
+            "import failed for window {}: {}",
             browser_window.id,
-            String::from_utf8_lossy(&xwd.stderr).trim()
-        ));
-    }
-
-    let mut convert = std::process::Command::new("convert")
-        .args(["xwd:-", output_path])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .context("failed to start ImageMagick convert")?;
-
-    use std::io::Write;
-    if let Some(stdin) = convert.stdin.as_mut() {
-        stdin
-            .write_all(&xwd.stdout)
-            .context("failed to write screenshot data into convert stdin")?;
-    }
-
-    let convert_output = convert
-        .wait_with_output()
-        .context("failed waiting for convert process")?;
-
-    if !convert_output.status.success() {
-        return Err(anyhow!(
-            "convert failed: {}",
-            String::from_utf8_lossy(&convert_output.stderr).trim()
+            String::from_utf8_lossy(&capture.stderr).trim()
         ));
     }
 

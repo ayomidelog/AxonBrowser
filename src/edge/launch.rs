@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -69,8 +69,7 @@ pub async fn launch_and_wait(
     let profile_dir = prepare_profile_dir(profile_override)?;
     let log_path = unique_path("axonbrowser-edge-launch", "log");
     let browser_binary = find_edge_binary()?;
-    let mut child = spawn_browser(&browser_binary, &profile_dir, &log_path, &url)?;
-    let pid = child.id();
+    let pid = spawn_browser(&browser_binary, &profile_dir, &log_path, &url)?;
 
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
@@ -92,14 +91,6 @@ pub async fn launch_and_wait(
                 width: window_match.width,
                 height: window_match.height,
             });
-        }
-
-        if let Some(status) = child.try_wait()? {
-            bail!(
-                "edge exited before exposing a visible window (status: {}); log: {}",
-                status,
-                log_path.display()
-            );
         }
 
         if start.elapsed() >= timeout {
@@ -128,7 +119,7 @@ fn spawn_browser(
     profile_dir: &PathBuf,
     log_path: &PathBuf,
     url: &str,
-) -> Result<Child> {
+) -> Result<u32> {
     let stdout = File::create(log_path)
         .with_context(|| format!("failed to create edge launch log at {}", log_path.display()))?;
     let stderr = stdout.try_clone().with_context(|| {
@@ -138,7 +129,9 @@ fn spawn_browser(
         )
     })?;
 
-    Command::new(browser_binary)
+    Command::new("setsid")
+        .arg("-f")
+        .arg(browser_binary)
         .arg(format!("--user-data-dir={}", profile_dir.display()))
         .args([
             "--no-first-run",
@@ -156,7 +149,35 @@ fn spawn_browser(
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()
-        .with_context(|| format!("failed to launch {browser_binary}"))
+        .with_context(|| format!("failed to detach {browser_binary}"))?;
+
+    find_browser_pid(profile_dir, url)
+}
+
+fn find_browser_pid(profile_dir: &PathBuf, url: &str) -> Result<u32> {
+    let profile_text = profile_dir.display().to_string();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        let output = Command::new("pgrep").args(["-af", "edge"]).output()?;
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                if !line.contains(&profile_text) || !line.contains(url) {
+                    continue;
+                }
+                if let Some((pid_text, _)) = line.trim().split_once(' ')
+                    && let Ok(pid) = pid_text.parse::<u32>()
+                {
+                    return Ok(pid);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Err(anyhow!(
+        "failed to resolve launched edge pid for profile {}",
+        profile_text
+    ))
 }
 
 fn find_edge_binary() -> Result<String> {

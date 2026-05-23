@@ -1,43 +1,64 @@
 use anyhow::{Result, anyhow};
 
-use crate::{
-    chrome::{locators::ChromeLocator, retry},
-    model::LiveNode,
-};
-
-use super::super::locators;
+use crate::chrome::{devtools, retry, session};
 
 #[derive(Debug, Clone)]
 pub struct TabInfo {
     pub index: usize,
+    pub id: String,
     pub title: String,
-    pub node: LiveNode,
     pub is_current: bool,
 }
 
 pub async fn resolve_tabs_with_current() -> Result<Vec<TabInfo>> {
     retry::with_transient_retry(|| async {
-        let tabs = locators::resolve_chain_for_testing(&["Page Tab List", "Page Tab"]).await?;
+        let tabs = devtools::list_pages_for_session()?;
         if tabs.is_empty() {
             return Err(anyhow!("no chrome tabs matched"));
         }
-
-        let current_tab = locators::resolve(ChromeLocator::CurrentTab).await.ok();
-        Ok(build_tab_infos(&tabs, current_tab.as_ref()))
+        let current_tab = devtools::current_page()?;
+        Ok(build_tab_infos(
+            &tabs,
+            current_tab.as_ref().map(|page| page.id.as_str()),
+        ))
     })
     .await
 }
 
-fn build_tab_infos(tabs: &[LiveNode], current: Option<&LiveNode>) -> Vec<TabInfo> {
-    tabs.iter()
+fn build_tab_infos(tabs: &[devtools::PageInfo], current_id: Option<&str>) -> Vec<TabInfo> {
+    let remembered_id = session::read_browser_tab_target();
+    let mut ordered = tabs.to_vec();
+    ordered.sort_by(|left, right| sort_key(left, current_id, remembered_id.as_deref()).cmp(&sort_key(right, current_id, remembered_id.as_deref())));
+
+    ordered
+        .iter()
         .enumerate()
         .map(|(index, tab)| TabInfo {
             index,
-            title: tab.name.as_deref().unwrap_or("<unnamed>").to_string(),
-            node: tab.clone(),
-            is_current: current.map(|node| node.path == tab.path).unwrap_or(false),
+            id: tab.id.clone(),
+            title: if tab.title.trim().is_empty() {
+                "<untitled>".to_string()
+            } else {
+                tab.title.clone()
+            },
+            is_current: current_id.map(|id| id == tab.id).unwrap_or(false),
         })
         .collect()
+}
+
+fn sort_key(
+    tab: &devtools::PageInfo,
+    current_id: Option<&str>,
+    remembered_id: Option<&str>,
+) -> (u8, u8, String, String) {
+    let is_current = current_id.map(|id| id == tab.id).unwrap_or(false);
+    let is_remembered = remembered_id.map(|id| id == tab.id).unwrap_or(false);
+    (
+        if is_current { 0 } else { 1 },
+        if is_remembered { 0 } else { 1 },
+        tab.title.to_ascii_lowercase(),
+        tab.id.clone(),
+    )
 }
 
 pub fn render_tabs(tabs: &[TabInfo]) -> String {
@@ -51,29 +72,23 @@ pub fn render_tabs(tabs: &[TabInfo]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use atspi::ObjectRefOwned;
-
-    use crate::model::LiveNode;
-
     use super::{TabInfo, build_tab_infos, render_tabs};
+    use crate::chrome::devtools::PageInfo;
 
-    fn fake_tab(name: &str, path: &[&str]) -> LiveNode {
-        LiveNode {
-            object_ref: ObjectRefOwned::from_static_str_unchecked(
-                "org.a11y.atspi.Registry",
-                "/org/a11y/atspi/accessible/null",
-            ),
-            role: "Page Tab".into(),
-            name: Some(name.into()),
-            path: path.iter().map(|s| s.to_string()).collect(),
+    fn fake_tab(id: &str, title: &str, url: &str) -> PageInfo {
+        PageInfo {
+            id: id.into(),
+            title: title.into(),
+            url: url.into(),
+            web_socket_debugger_url: "ws://127.0.0.1/devtools/page/test".into(),
         }
     }
 
     #[test]
     fn marks_current_tab() {
-        let first = fake_tab("one", &["Window", "Tab Strip", "one"]);
-        let second = fake_tab("two", &["Window", "Tab Strip", "two"]);
-        let tabs = build_tab_infos(&[first.clone(), second.clone()], Some(&second));
+        let first = fake_tab("one", "one", "https://one");
+        let second = fake_tab("two", "two", "https://two");
+        let tabs = build_tab_infos(&[first.clone(), second.clone()], Some("two"));
         assert!(!tabs[0].is_current);
         assert!(tabs[1].is_current);
         let rendered = render_tabs(&tabs);
@@ -85,8 +100,8 @@ mod tests {
     fn renders_without_current_marker_when_unknown() {
         let tabs = vec![TabInfo {
             index: 0,
+            id: "lonely".into(),
             title: "lonely".into(),
-            node: fake_tab("lonely", &["Window", "Tab Strip", "lonely"]),
             is_current: false,
         }];
         let rendered = render_tabs(&tabs);

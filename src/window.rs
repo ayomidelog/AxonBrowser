@@ -21,6 +21,9 @@ pub fn active_window_id() -> Result<String> {
         .context("failed to query the active X11 window")?;
 
     if !output.status.success() {
+        if let Some(window) = list_visible_windows()?.into_iter().next() {
+            return Ok(window.id);
+        }
         return Err(anyhow!(
             "xdotool getactivewindow failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
@@ -264,6 +267,16 @@ pub fn resize_window(window_id: &str, width: u32, height: u32) -> Result<()> {
 }
 
 pub fn list_visible_windows() -> Result<Vec<WindowMatch>> {
+    if let Ok(windows) = list_visible_windows_via_wmctrl() {
+        if !windows.is_empty() {
+            return Ok(windows);
+        }
+    }
+
+    list_visible_windows_via_xwininfo()
+}
+
+fn list_visible_windows_via_wmctrl() -> Result<Vec<WindowMatch>> {
     let output = Command::new("wmctrl")
         .arg("-lpG")
         .output()
@@ -275,10 +288,7 @@ pub fn list_visible_windows() -> Result<Vec<WindowMatch>> {
         if trimmed.contains("_NET_CLIENT_LIST") || trimmed.contains("_WIN_CLIENT_LIST") {
             return Ok(Vec::new());
         }
-        return Err(anyhow!(
-            "wmctrl -lpG failed: {}",
-            trimmed
-        ));
+        return Err(anyhow!("wmctrl -lpG failed: {}", trimmed));
     }
 
     let mut matches = Vec::new();
@@ -293,6 +303,32 @@ pub fn list_visible_windows() -> Result<Vec<WindowMatch>> {
         matches.push(window);
     }
 
+    Ok(matches)
+}
+
+fn list_visible_windows_via_xwininfo() -> Result<Vec<WindowMatch>> {
+    let output = Command::new("xwininfo")
+        .args(["-root", "-tree", "-int"])
+        .output()
+        .context("failed to run xwininfo -root -tree -int")?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "xwininfo -root -tree -int failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let mut matches = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some(window) = parse_xwininfo_line(line) else {
+            continue;
+        };
+        if window.width == 0 || window.height == 0 {
+            continue;
+        }
+        matches.push(window);
+    }
     Ok(matches)
 }
 
@@ -343,6 +379,57 @@ fn parse_wmctrl_line(line: &str) -> Option<WindowMatch> {
         y,
         width,
         height,
+    })
+}
+
+fn parse_xwininfo_line(line: &str) -> Option<WindowMatch> {
+    let trimmed = line.trim();
+    if !(trimmed.starts_with("0x") || trimmed.chars().next()?.is_ascii_digit()) {
+        return None;
+    }
+
+    let (id_hex, rest) = trimmed.split_once(' ')?;
+    let id = if let Some(stripped) = id_hex.strip_prefix("0x") {
+        u64::from_str_radix(stripped, 16).ok()?.to_string()
+    } else {
+        id_hex.parse::<u64>().ok()?.to_string()
+    };
+
+    let name_start = rest.find('"')?;
+    let name_end = rest[name_start + 1..].find('"')?;
+    let name = rest[name_start + 1..name_start + 1 + name_end].to_string();
+    if name.trim().is_empty() {
+        return None;
+    }
+
+    let geometry = rest
+        .split_whitespace()
+        .find(|token| {
+            let bytes = token.as_bytes();
+            bytes
+                .iter()
+                .position(|byte| *byte == b'x')
+                .is_some_and(|x_index| {
+                    x_index > 0
+                        && bytes
+                            .iter()
+                            .skip(x_index + 1)
+                            .filter(|byte| **byte == b'+')
+                            .count()
+                            >= 2
+                })
+        })?;
+    let (width, rest) = geometry.split_once('x')?;
+    let (height, pos) = rest.split_once('+')?;
+    let (x, y) = pos.split_once('+')?;
+
+    Some(WindowMatch {
+        id,
+        name,
+        x: x.parse().ok()?,
+        y: y.parse().ok()?,
+        width: width.parse().ok()?,
+        height: height.parse().ok()?,
     })
 }
 

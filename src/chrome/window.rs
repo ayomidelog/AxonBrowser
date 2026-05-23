@@ -21,10 +21,25 @@ pub fn find_browser_window(query_override: Option<&str>) -> Result<WindowMatch> 
             .ok_or_else(|| anyhow!("no visible Chrome/Chromium window found"));
     }
 
-    if let Some(target_id) = session::read_browser_window_target() {
-        if let Ok(window) = find_browser_window_by_id(&target_id) {
-            return Ok(window);
-        }
+    if let Some(window) = list_browser_windows(None)?
+        .into_iter()
+        .find(|window| is_primary_browser_window(window) && is_active_window(window))
+    {
+        return Ok(window);
+    }
+
+    if let Some(target_id) = session::read_browser_window_target()
+        && let Ok(window) = find_browser_window_by_id(&target_id)
+        && is_primary_browser_window(&window)
+    {
+        return Ok(window);
+    }
+
+    if let Some(window) = list_browser_windows(None)?
+        .into_iter()
+        .find(|window| is_primary_browser_window(window))
+    {
+        return Ok(window);
     }
 
     list_browser_windows(None)?
@@ -55,7 +70,7 @@ pub fn list_browser_windows(query_override: Option<&str>) -> Result<Vec<WindowMa
     Ok(windows)
 }
 
-fn sort_key(window: &WindowMatch) -> (u8, u8, u8, String) {
+fn sort_key(window: &WindowMatch) -> (u8, u8, u8, u8, std::cmp::Reverse<u64>, String) {
     let active_id = window::active_window_id().ok();
     let target_id = session::read_browser_window_target();
     let is_active = active_id
@@ -67,12 +82,30 @@ fn sort_key(window: &WindowMatch) -> (u8, u8, u8, String) {
         .map(|id| id == window.id)
         .unwrap_or(false);
     let is_welcome = normalize(&window.name).contains("welcome to google chrome");
+    let is_tiny = window.width < 200 || window.height < 120;
+    let area = u64::from(window.width) * u64::from(window.height);
     (
         if is_target { 0 } else { 1 },
         if is_active { 0 } else { 1 },
+        if is_tiny { 1 } else { 0 },
         if is_welcome { 1 } else { 0 },
+        std::cmp::Reverse(area),
         window.id.clone(),
     )
+}
+
+fn is_primary_browser_window(window: &WindowMatch) -> bool {
+    !normalize(&window.name).contains("clipboard")
+        && window.width >= 200
+        && window.height >= 120
+        && normalize(&window.name).contains("google chrome")
+}
+
+fn is_active_window(window: &WindowMatch) -> bool {
+    window::active_window_id()
+        .ok()
+        .as_deref()
+        == Some(window.id.as_str())
 }
 
 fn is_browser_window_name(name: &str) -> bool {

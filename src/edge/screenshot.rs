@@ -2,7 +2,7 @@ use anyhow::Result;
 
 pub use crate::chrome::screenshot::ScreenshotMode;
 
-pub fn capture_mode(
+pub async fn capture_mode(
     output_path: &str,
     query_override: Option<&str>,
     mode: ScreenshotMode,
@@ -16,45 +16,28 @@ pub fn capture_mode(
             output_path,
             query_override,
             ScreenshotMode::Active,
-        ),
+        )
+        .await,
     }
 }
 
 fn capture_window(output_path: &str, window: &crate::window::WindowMatch) -> Result<String> {
-    use std::{fs, path::Path, process::Stdio};
+    use std::{fs, path::Path};
 
     let output = Path::new(output_path);
     if let Some(parent) = output.parent().filter(|path| !path.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
 
-    let xwd = std::process::Command::new("xwd")
-        .args(["-silent", "-id", &window.id])
+    let capture = std::process::Command::new("import")
+        .args(["-window", &window.id, output_path])
         .output()?;
 
-    if !xwd.status.success() {
+    if !capture.status.success() {
         anyhow::bail!(
-            "xwd failed for window {}: {}",
+            "import failed for window {}: {}",
             window.id,
-            String::from_utf8_lossy(&xwd.stderr).trim()
-        );
-    }
-
-    let mut convert = std::process::Command::new("convert")
-        .args(["xwd:-", output_path])
-        .stdin(Stdio::piped())
-        .spawn()?;
-
-    use std::io::Write;
-    if let Some(stdin) = convert.stdin.as_mut() {
-        stdin.write_all(&xwd.stdout)?;
-    }
-
-    let convert_output = convert.wait_with_output()?;
-    if !convert_output.status.success() {
-        anyhow::bail!(
-            "convert failed: {}",
-            String::from_utf8_lossy(&convert_output.stderr).trim()
+            String::from_utf8_lossy(&capture.stderr).trim()
         );
     }
 

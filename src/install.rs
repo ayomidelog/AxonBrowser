@@ -47,7 +47,6 @@ pub fn install_deps() -> Result<()> {
 fn install_runtime_packages(distro: &Distro, need_headless: bool) -> Result<()> {
     let mut packages = vec![
         "imagemagick",
-        "wmctrl",
         "xclip",
         "xdotool",
         "curl",
@@ -56,9 +55,9 @@ fn install_runtime_packages(distro: &Distro, need_headless: bool) -> Result<()> 
 
     match distro.package_manager {
         PackageManager::Apt => {
-            packages.extend(["dbus-x11", "python3-venv", "x11-utils"]);
+            packages.extend(["at-spi2-core", "dbus-x11", "python3-venv", "x11-utils"]);
             if need_headless {
-                packages.extend(["openbox", "x11vnc", "xvfb"]);
+                packages.extend(["xvfb"]);
             }
             run_privileged("apt-get", &["update"])?;
             let mut args = vec!["install", "-y"];
@@ -66,18 +65,24 @@ fn install_runtime_packages(distro: &Distro, need_headless: bool) -> Result<()> 
             run_privileged("apt-get", &args)?;
         }
         PackageManager::Dnf => {
-            packages.extend(["dbus-x11", "python3", "python3-pip", "xorg-x11-utils"]);
+            packages.extend([
+                "at-spi2-core",
+                "dbus-x11",
+                "python3",
+                "python3-pip",
+                "xorg-x11-utils",
+            ]);
             if need_headless {
-                packages.extend(["openbox", "x11vnc", "xorg-x11-server-Xvfb"]);
+                packages.extend(["xorg-x11-server-Xvfb"]);
             }
             let mut args = vec!["install", "-y"];
             args.extend(packages.iter().copied());
             run_privileged("dnf", &args)?;
         }
         PackageManager::Pacman => {
-            packages.extend(["dbus", "python", "python-pip", "xorg-xdpyinfo"]);
+            packages.extend(["at-spi2-core", "dbus", "python", "python-pip", "xorg-xdpyinfo"]);
             if need_headless {
-                packages.extend(["openbox", "x11vnc", "xorg-server-xvfb"]);
+                packages.extend(["xorg-server-xvfb"]);
             }
             run_privileged("pacman", &["-Sy", "--noconfirm"])?;
             let mut args = vec!["-S", "--noconfirm"];
@@ -85,9 +90,15 @@ fn install_runtime_packages(distro: &Distro, need_headless: bool) -> Result<()> 
             run_privileged("pacman", &args)?;
         }
         PackageManager::Zypper => {
-            packages.extend(["dbus-1-x11", "python312", "python312-pip", "xprop"]);
+            packages.extend([
+                "at-spi2-core",
+                "dbus-1-x11",
+                "python312",
+                "python312-pip",
+                "xprop",
+            ]);
             if need_headless {
-                packages.extend(["openbox", "x11vnc", "xorg-x11-server-extra"]);
+                packages.extend(["xorg-x11-server-extra"]);
             }
             let mut args = vec!["install", "-y"];
             args.extend(packages.iter().copied());

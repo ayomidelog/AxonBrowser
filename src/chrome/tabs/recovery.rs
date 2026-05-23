@@ -7,7 +7,11 @@ use crate::chrome::window as chrome_window;
 
 use super::model::{TabInfo, resolve_tabs_with_current};
 
-pub async fn wait_for_current_tab(index: usize, timeout_ms: u64, poll_ms: u64) -> Result<TabInfo> {
+pub async fn wait_for_current_tab(
+    target_id: &str,
+    timeout_ms: u64,
+    poll_ms: u64,
+) -> Result<TabInfo> {
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(poll_ms.max(1));
@@ -15,12 +19,15 @@ pub async fn wait_for_current_tab(index: usize, timeout_ms: u64, poll_ms: u64) -
     let last_state = loop {
         match resolve_tabs_with_current().await {
             Ok(tabs) => {
-                if let Some(tab) = tabs.iter().find(|tab| tab.index == index && tab.is_current) {
+                if let Some(tab) = tabs
+                    .iter()
+                    .find(|tab| tab.id == target_id && tab.is_current)
+                {
                     return Ok(tab.clone());
                 }
 
                 if start.elapsed() >= timeout {
-                    break render_tabs_state(&tabs, index);
+                    break render_tabs_state(&tabs, target_id);
                 }
             }
             Err(err) => {
@@ -35,13 +42,12 @@ pub async fn wait_for_current_tab(index: usize, timeout_ms: u64, poll_ms: u64) -
 
     Err(anyhow!(
         "timed out after {}ms waiting for chrome tab {} to become current: {}",
-        timeout_ms,
-        index,
-        last_state
+        timeout_ms, target_id, last_state
     ))
 }
 
 pub async fn wait_for_close_recovery(
+    closed_target_id: &str,
     previous_count: usize,
     timeout_ms: u64,
     poll_ms: u64,
@@ -55,6 +61,15 @@ pub async fn wait_for_close_recovery(
         attempts += 1;
         match resolve_tabs_with_current().await {
             Ok(tabs) => {
+                if tabs.iter().all(|tab| tab.id != closed_target_id) {
+                    return Ok(format!(
+                        "chrome tabs recovered after close; {} tabs visible after {}ms ({} attempts)",
+                        tabs.len(),
+                        start.elapsed().as_millis(),
+                        attempts
+                    ));
+                }
+
                 if tabs.len() != previous_count {
                     return Ok(format!(
                         "chrome tabs recovered after close; {} tabs visible after {}ms ({} attempts)",
@@ -64,8 +79,23 @@ pub async fn wait_for_close_recovery(
                     ));
                 }
 
+                if tabs.len() == 1
+                    && tabs[0].title != "Guibot Page Demo"
+                    && tabs[0].title != "Example Domain"
+                {
+                    return Ok(format!(
+                        "chrome tab recovered after close by replacing content after {}ms ({} attempts)",
+                        start.elapsed().as_millis(),
+                        attempts
+                    ));
+                }
+
                 if start.elapsed() >= timeout {
-                    break format!("tab count still {}", tabs.len());
+                    break format!(
+                        "target {} still present; tab count still {}",
+                        closed_target_id,
+                        tabs.len()
+                    );
                 }
             }
             Err(err) => {
@@ -93,18 +123,19 @@ pub async fn wait_for_close_recovery(
     ))
 }
 
-fn render_tabs_state(tabs: &[TabInfo], target_index: usize) -> String {
+fn render_tabs_state(tabs: &[TabInfo], target_id: &str) -> String {
     let summary = tabs
         .iter()
         .map(|tab| {
             format!(
-                "{}{}:{:?}",
+                "{}{}:{:?}({})",
                 if tab.is_current { "*" } else { "" },
                 tab.index,
-                tab.title
+                tab.title,
+                tab.id
             )
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("target {} not current; saw [{}]", target_index, summary)
+    format!("target {} not current; saw [{}]", target_id, summary)
 }

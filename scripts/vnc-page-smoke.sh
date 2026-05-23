@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 set +u
-source /home/ayovps/.vnc/session.env
+source "${GUIBOT_VNC_SESSION_ENV:-$HOME/.cache/axonbrowser/headless/session.env}"
 set -u
 export RUSTFLAGS='-Awarnings'
 PORT=8124

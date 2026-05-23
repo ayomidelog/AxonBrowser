@@ -1,3 +1,5 @@
+use std::{thread, time::Duration};
+
 use anyhow::{Context, Result, anyhow};
 
 use crate::{
@@ -84,6 +86,7 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
         stdin
             .write_all(text.as_bytes())
             .context("failed to write clipboard payload")?;
+        drop(stdin);
     }
 
     let status = copy
@@ -100,8 +103,55 @@ pub fn type_via_clipboard(window_id: &str, text: &str) -> Result<()> {
     copy_to_clipboard(text)?;
     let _ = activate_window_note(window_id);
     window::send_key(window_id, "ctrl+l")?;
+    let _ = window::send_key(window_id, "ctrl+a");
+    let _ = window::send_key(window_id, "BackSpace");
     window::send_key(window_id, "ctrl+v")?;
     Ok(())
+}
+
+pub fn read_from_clipboard() -> Result<String> {
+    let output = std::process::Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .output()
+        .context("failed to read clipboard via xclip")?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "xclip failed to read clipboard: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn focus_address_bar(window_id: &str) -> Result<()> {
+    let _ = activate_window_note(window_id);
+    window::send_key(window_id, "ctrl+l")
+}
+
+pub fn read_address_bar_via_clipboard(window_id: &str) -> Result<String> {
+    let sentinel = format!(
+        "__axonbrowser_clipboard_probe_{}__",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    copy_to_clipboard(&sentinel)?;
+    focus_address_bar(window_id)?;
+    thread::sleep(Duration::from_millis(120));
+    let _ = window::send_key(window_id, "ctrl+a");
+    thread::sleep(Duration::from_millis(60));
+    window::send_key(window_id, "ctrl+c")?;
+    thread::sleep(Duration::from_millis(120));
+    let clipboard = read_from_clipboard()?;
+    if clipboard == sentinel {
+        return Err(anyhow!(
+            "address bar clipboard read did not update the clipboard"
+        ));
+    }
+    Ok(clipboard)
 }
 
 fn node_belongs_to_window_title(node: &LiveNode, window_title: &str) -> bool {

@@ -1,6 +1,4 @@
-use anyhow::Result;
-
-use crate::window;
+use anyhow::{Result, bail};
 
 use super::{context, focus};
 
@@ -16,12 +14,21 @@ pub async fn type_text(locator_raw: &str, text: &str) -> Result<String> {
 
     let browser_window = target.browser_window().await?;
     let activation_note = context::activate_window_note(&browser_window.id);
+    context::type_via_clipboard(&browser_window.id, text)?;
+    if target.is_address_bar() {
+        let observed = context::read_address_bar_via_clipboard(&browser_window.id)?;
+        if observed.trim() != text.trim() {
+            bail!(
+                "address bar write verification failed: expected {:?}, observed {:?}",
+                text,
+                observed
+            );
+        }
+    }
     let input_mode = if target.is_address_bar() {
-        context::type_via_clipboard(&browser_window.id, text)?;
         "clipboard paste"
     } else {
-        window::type_text(&browser_window.id, text)?;
-        "X11 key injection"
+        "clipboard paste"
     };
 
     Ok(format!(
