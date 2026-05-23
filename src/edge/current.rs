@@ -39,9 +39,14 @@ pub async fn snapshot_for_window(window_id: Option<&str>) -> Result<EdgeCurrentS
         Some(id) => {
             let window = window::find_edge_window_by_id(id)?;
             let _ = crate::edge::session::remember_browser_window_target(&window.id);
+            let _ = crate::edge::discovery::remember_profile_from_window(&window.id);
             window
         }
-        None => window::find_edge_window(None)?,
+        None => {
+            let window = window::find_edge_window(None)?;
+            let _ = crate::edge::discovery::remember_profile_from_window(&window.id);
+            window
+        }
     };
     let tabs = tabs::model::resolve_tabs_with_current().await?;
     let current = tabs

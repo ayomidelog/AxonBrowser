@@ -71,6 +71,46 @@ pub fn find_window_by_title_contains(query: &str) -> Result<WindowMatch> {
         .ok_or_else(|| anyhow!("no visible X11 window title contains {:?}", query))
 }
 
+pub fn window_pid(window_id: &str) -> Result<u32> {
+    let output = Command::new("xprop")
+        .args(["-id", window_id, "_NET_WM_PID"])
+        .output()
+        .with_context(|| format!("failed to query X11 window pid for {window_id}"))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "xprop _NET_WM_PID failed for {}: {}",
+            window_id,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pid = stdout
+        .split('=')
+        .nth(1)
+        .map(str::trim)
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .ok_or_else(|| anyhow!("xprop _NET_WM_PID returned no pid for {}", window_id))?;
+
+    Ok(pid)
+}
+
+pub fn pid_cmdline(pid: u32) -> Result<String> {
+    let path = format!("/proc/{pid}/cmdline");
+    let bytes = std::fs::read(&path).with_context(|| format!("failed to read {path}"))?;
+    if bytes.is_empty() {
+        bail!("empty cmdline for pid {}", pid);
+    }
+
+    Ok(bytes
+        .split(|byte| *byte == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
 pub fn activate_window(id: &str) -> Result<()> {
     let output = Command::new("xdotool")
         .args(["windowactivate", "--sync", id])

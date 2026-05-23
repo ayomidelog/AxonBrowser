@@ -41,6 +41,7 @@ pub async fn snapshot(window_id: Option<&str>) -> Result<EdgeAttachState> {
         None => window::find_edge_window(None)?,
     };
     session::remember_target(&window.id)?;
+    let _ = crate::edge::discovery::remember_profile_from_window(&window.id);
     let current = current::snapshot().await?;
 
     Ok(EdgeAttachState {
