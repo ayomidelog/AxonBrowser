@@ -259,7 +259,7 @@ pub async fn close_context_by_index(index: usize) -> Result<String> {
             )
             .await?;
         client
-            .wait_for_context_close(&target.url, previous_count, Duration::from_secs(4))
+            .wait_for_context_close(&target.context, previous_count, Duration::from_secs(4))
             .await
     }
     .await;
@@ -309,6 +309,10 @@ impl BidiSession {
     async fn connect() -> Result<Self> {
         let port = session::read_browser_port()
             .ok_or_else(|| anyhow!("no Firefox BiDi port remembered for the current session"))?;
+        Self::connect_to_port(port).await
+    }
+
+    async fn connect_to_port(port: u16) -> Result<Self> {
         let url = format!("ws://127.0.0.1:{port}/session");
         let (stream, _) = connect_async(&url)
             .await
@@ -467,17 +471,19 @@ impl BidiSession {
             return Ok(listed);
         }
 
-        if let Some(url) = session::read_browser_url()
-            && let Some(index) = listed
-                .iter()
-                .position(|context| canonical_url(&context.url) == canonical_url(&url))
-        {
-            for context in &mut listed {
-                context.is_current = false;
+        if !listed.iter().any(|context| context.is_current) {
+            if let Some(url) = session::read_browser_url()
+                && let Some(index) = listed
+                    .iter()
+                    .position(|context| canonical_url(&context.url) == canonical_url(&url))
+            {
+                for context in &mut listed {
+                    context.is_current = false;
+                }
+                listed[index].is_current = true;
+            } else {
+                listed[0].is_current = true;
             }
-            listed[index].is_current = true;
-        } else if !listed.iter().any(|context| context.is_current) {
-            listed[0].is_current = true;
         }
 
         self.last_current_context = listed.iter().find(|context| context.is_current).cloned();
@@ -570,12 +576,11 @@ impl BidiSession {
 
     async fn wait_for_context_close(
         &mut self,
-        closed_url: &str,
+        closed_context_id: &str,
         previous_count: usize,
         timeout: Duration,
     ) -> Result<String> {
         let start = Instant::now();
-        let closed = canonical_url(closed_url);
         let mut attempts = 0u64;
         loop {
             attempts += 1;
@@ -583,7 +588,7 @@ impl BidiSession {
             if contexts.len() != previous_count
                 || contexts
                     .iter()
-                    .all(|context| canonical_url(&context.url) != closed)
+                    .all(|context| context.context != closed_context_id)
             {
                 if let Some(current) = contexts.iter().find(|context| context.is_current) {
                     remember_context(current)?;
@@ -651,6 +656,18 @@ impl BidiSession {
             "timed out waiting for Firefox window.open tab creation"
         ))
     }
+}
+
+pub async fn current_context_on_port(
+    port: u16,
+    url_hint: Option<&str>,
+) -> Result<Option<ContextInfo>> {
+    let mut client = BidiSession::connect_to_port(port).await?;
+    client.start().await?;
+    let result = client.current_context_with_hint(None, url_hint).await;
+    let end_result = client.end().await;
+    end_result?;
+    result
 }
 
 fn remember_context(context: &ContextInfo) -> Result<()> {

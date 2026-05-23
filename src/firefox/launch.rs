@@ -117,19 +117,63 @@ pub async fn launch_and_wait_with_flavor(
         &url,
         bidi_port,
     )?;
+    let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+    let _ = session::remember_browser_url(&url);
+    let _ = session::remember_browser_port(bidi_port);
 
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms.max(15_000));
     let interval = Duration::from_millis(poll_ms.max(1));
 
     loop {
-        if let Some(window_match) = detect_new_window(&baseline)? {
+        if let Some(current) = bidi_ready_on_port(bidi_port, &url).await? {
+            let preferred =
+                choose_window_for_context(pid, &baseline, current.title.as_str())?;
+            if let Some(window_match) = preferred.or_else(|| find_window_for_pid(pid).ok().flatten())
+            {
+                let _ = crate::window::activate_window(&window_match.id);
+                let _ = session::remember_browser_window_target(&window_match.id);
+                return Ok(FirefoxLaunchState {
+                    pid,
+                    profile: profile_dir.display().to_string(),
+                    log_path: log_path.display().to_string(),
+                    url: url.clone(),
+                    window_id: window_match.id,
+                    window_title: window_match.name,
+                    x: window_match.x,
+                    y: window_match.y,
+                    width: window_match.width,
+                    height: window_match.height,
+                    bidi_port,
+                });
+            }
+        }
+
+        if let Some(window_match) = find_window_for_pid(pid)?
+            && bidi_ready_on_port(bidi_port, &url).await?.is_some()
+        {
             let _ = crate::window::activate_window(&window_match.id);
             let _ = session::remember_browser_window_target(&window_match.id);
-            let _ = session::remember_browser_url(&url);
-            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
-            let _ = session::remember_browser_port(bidi_port);
-            let _ = remember_initial_context(&url).await;
+            return Ok(FirefoxLaunchState {
+                pid,
+                profile: profile_dir.display().to_string(),
+                log_path: log_path.display().to_string(),
+                url: url.clone(),
+                window_id: window_match.id,
+                window_title: window_match.name,
+                x: window_match.x,
+                y: window_match.y,
+                width: window_match.width,
+                height: window_match.height,
+                bidi_port,
+            });
+        }
+
+        if let Some(window_match) = detect_new_window(&baseline)?
+            && bidi_ready_on_port(bidi_port, &url).await?.is_some()
+        {
+            let _ = crate::window::activate_window(&window_match.id);
+            let _ = session::remember_browser_window_target(&window_match.id);
             return Ok(FirefoxLaunchState {
                 pid,
                 profile: profile_dir.display().to_string(),
@@ -146,6 +190,7 @@ pub async fn launch_and_wait_with_flavor(
         }
 
         if start.elapsed() >= timeout {
+            session::clear_browser_session_state();
             bail!(
                 "timed out after {}ms waiting for a new {} window; log: {}",
                 timeout_ms,
@@ -160,18 +205,56 @@ pub async fn launch_and_wait_with_flavor(
 
 fn detect_new_window(baseline: &HashSet<String>) -> Result<Option<crate::window::WindowMatch>> {
     for window_match in window::list_firefox_windows(None)? {
-        if !baseline.contains(&window_match.id) {
+        if is_launch_candidate(&window_match) && !baseline.contains(&window_match.id) {
             return Ok(Some(window_match));
         }
     }
     Ok(None)
 }
 
+fn find_window_for_pid(pid: u32) -> Result<Option<crate::window::WindowMatch>> {
+    Ok(window::list_firefox_windows(None)?
+        .into_iter()
+        .find(|window| {
+            is_launch_candidate(window)
+                && crate::window::window_pid(&window.id)
+                    .map(|window_pid| window_pid == pid)
+                    .unwrap_or(false)
+        }))
+}
+
+fn is_launch_candidate(window: &crate::window::WindowMatch) -> bool {
+    let normalized = crate::firefox::window::normalize(&window.name);
+    !normalized.contains("clipboard") && window.width >= 200 && window.height >= 120
+}
+
+fn choose_window_for_context(
+    pid: u32,
+    baseline: &HashSet<String>,
+    title: &str,
+) -> Result<Option<crate::window::WindowMatch>> {
+    let windows = window::list_firefox_windows(None)?;
+    let title = crate::firefox::window::normalize(title);
+
+    Ok(windows
+        .into_iter()
+        .filter(is_launch_candidate)
+        .max_by_key(|window_match| {
+            let normalized = crate::firefox::window::normalize(&window_match.name);
+            let title_match = (!title.is_empty() && normalized.contains(&title)) as u8;
+            let is_new = (!baseline.contains(&window_match.id)) as u8;
+            let pid_match = crate::window::window_pid(&window_match.id)
+                .map(|window_pid| window_pid == pid)
+                .unwrap_or(false) as u8;
+            (title_match, is_new, pid_match, window_match.width * window_match.height)
+        }))
+}
+
 fn spawn_browser(
     flavor: BrowserFlavor,
     browser_binary: &str,
-    profile_dir: &PathBuf,
-    log_path: &PathBuf,
+    profile_dir: &Path,
+    log_path: &Path,
     url: &str,
     bidi_port: u16,
 ) -> Result<u32> {
@@ -403,17 +486,12 @@ fn allocate_bidi_port() -> Result<u16> {
     Ok(port)
 }
 
-async fn remember_initial_context(url: &str) -> Result<()> {
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(5) {
-        if let Ok(Some(current_url)) = bidi::current_url().await
-            && !current_url.trim().is_empty()
-        {
-            let _ = session::remember_browser_url(&current_url);
-            return Ok(());
+async fn bidi_ready_on_port(bidi_port: u16, url: &str) -> Result<Option<bidi::ContextInfo>> {
+    if let Ok(Some(current)) = bidi::current_context_on_port(bidi_port, Some(url)).await {
+        if !current.url.trim().is_empty() {
+            let _ = session::remember_browser_url(&current.url);
+            return Ok(Some(current));
         }
-        tokio::time::sleep(Duration::from_millis(150)).await;
     }
-    let _ = session::remember_browser_url(url);
-    Ok(())
+    Ok(None)
 }
