@@ -23,7 +23,7 @@ pub fn find_browser_window(query_override: Option<&str>) -> Result<WindowMatch> 
 
     if let Some(window) = list_browser_windows(None)?
         .into_iter()
-        .find(|window| is_primary_browser_window(window) && is_active_window(window))
+        .find(is_active_primary_browser_window)
     {
         return Ok(window);
     }
@@ -37,7 +37,7 @@ pub fn find_browser_window(query_override: Option<&str>) -> Result<WindowMatch> 
 
     if let Some(window) = list_browser_windows(None)?
         .into_iter()
-        .find(|window| is_primary_browser_window(window))
+        .find(is_primary_browser_window)
     {
         return Ok(window);
     }
@@ -66,7 +66,7 @@ pub fn list_browser_windows(query_override: Option<&str>) -> Result<Vec<WindowMa
     }
 
     windows.retain(|window| is_browser_window_name(&window.name));
-    windows.sort_by_key(|window| sort_key(window));
+    windows.sort_by_key(sort_key);
     Ok(windows)
 }
 
@@ -99,6 +99,10 @@ fn is_primary_browser_window(window: &WindowMatch) -> bool {
         && window.width >= 200
         && window.height >= 120
         && normalize(&window.name).contains("google chrome")
+}
+
+fn is_active_primary_browser_window(window: &WindowMatch) -> bool {
+    is_primary_browser_window(window) && is_active_window(window)
 }
 
 fn is_active_window(window: &WindowMatch) -> bool {

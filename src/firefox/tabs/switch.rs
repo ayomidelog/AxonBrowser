@@ -27,7 +27,7 @@ pub async fn switch(target: TabSwitchTarget) -> Result<String> {
     ))
 }
 
-fn resolve_target<'a>(tabs: &'a [TabInfo], target: &TabSwitchTarget) -> Result<TabSwitchTarget> {
+fn resolve_target(tabs: &[TabInfo], target: &TabSwitchTarget) -> Result<TabSwitchTarget> {
     match target {
         TabSwitchTarget::Index(index) => {
             if tabs.iter().any(|tab| tab.index == *index) {

@@ -163,10 +163,10 @@ pub(crate) async fn resolve_chain_scoped(chain: &[&str]) -> Result<Vec<LiveNode>
         .collect::<Vec<_>>();
     let selectors = selector::parse_selector_chain(&raw)?;
     for query in browser_root_queries() {
-        if let Ok(nodes) = crate::inspect::resolve(&query, &selectors).await {
-            if !nodes.is_empty() {
-                return scope_nodes_to_active_window(nodes).await;
-            }
+        if let Ok(nodes) = crate::inspect::resolve(&query, &selectors).await
+            && !nodes.is_empty()
+        {
+            return scope_nodes_to_active_window(nodes).await;
         }
     }
     Err(anyhow!(

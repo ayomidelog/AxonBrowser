@@ -64,7 +64,7 @@ pub fn find_window_by_title_contains(query: &str) -> Result<WindowMatch> {
         .into_iter()
         .filter(|window| normalize_text(&window.name).contains(&needle))
         .collect::<Vec<_>>();
-    matches.sort_by_key(|window| area(window));
+    matches.sort_by_key(area);
     matches
         .into_iter()
         .next()
@@ -267,10 +267,10 @@ pub fn resize_window(window_id: &str, width: u32, height: u32) -> Result<()> {
 }
 
 pub fn list_visible_windows() -> Result<Vec<WindowMatch>> {
-    if let Ok(windows) = list_visible_windows_via_wmctrl() {
-        if !windows.is_empty() {
-            return Ok(windows);
-        }
+    if let Ok(windows) = list_visible_windows_via_wmctrl()
+        && !windows.is_empty()
+    {
+        return Ok(windows);
     }
 
     list_visible_windows_via_xwininfo()

@@ -67,39 +67,39 @@ pub async fn wait_for_page_change(
         let current_title = wait::current_title().await.ok();
         let current_url = wait::current_url().await.ok();
 
-        if let (Some(expected), Some(after)) = (expected_url.as_deref(), current_url.as_deref()) {
-            if normalize_observed_url(after) == expected {
-                return Ok(format!(
-                    "edge url reached {:?} after {}ms ({} attempts)",
-                    after,
-                    start.elapsed().as_millis(),
-                    attempts
-                ));
-            }
+        if let (Some(expected), Some(after)) = (expected_url.as_deref(), current_url.as_deref())
+            && normalize_observed_url(after) == expected
+        {
+            return Ok(format!(
+                "edge url reached {:?} after {}ms ({} attempts)",
+                after,
+                start.elapsed().as_millis(),
+                attempts
+            ));
         }
 
-        if let (Some(before), Some(after)) = (title_baseline.as_deref(), current_title.as_deref()) {
-            if after != before {
-                return Ok(format!(
-                    "edge title changed from {:?} to {:?} after {}ms ({} attempts)",
-                    before,
-                    after,
-                    start.elapsed().as_millis(),
-                    attempts
-                ));
-            }
+        if let (Some(before), Some(after)) = (title_baseline.as_deref(), current_title.as_deref())
+            && after != before
+        {
+            return Ok(format!(
+                "edge title changed from {:?} to {:?} after {}ms ({} attempts)",
+                before,
+                after,
+                start.elapsed().as_millis(),
+                attempts
+            ));
         }
 
-        if let (Some(before), Some(after)) = (url_baseline.as_deref(), current_url.as_deref()) {
-            if after != before {
-                return Ok(format!(
-                    "edge url changed from {:?} to {:?} after {}ms ({} attempts)",
-                    before,
-                    after,
-                    start.elapsed().as_millis(),
-                    attempts
-                ));
-            }
+        if let (Some(before), Some(after)) = (url_baseline.as_deref(), current_url.as_deref())
+            && after != before
+        {
+            return Ok(format!(
+                "edge url changed from {:?} to {:?} after {}ms ({} attempts)",
+                before,
+                after,
+                start.elapsed().as_millis(),
+                attempts
+            ));
         }
 
         if start.elapsed() >= timeout {

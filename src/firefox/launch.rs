@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     net::TcpListener,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -212,7 +212,7 @@ fn spawn_browser(
     find_browser_pid(profile_dir, url, bidi_port)
 }
 
-fn find_browser_pid(profile_dir: &PathBuf, url: &str, bidi_port: u16) -> Result<u32> {
+fn find_browser_pid(profile_dir: &Path, url: &str, bidi_port: u16) -> Result<u32> {
     let profile_text = profile_dir.display().to_string();
     let port_flag = format!("--remote-debugging-port={bidi_port}");
     let start = std::time::Instant::now();
@@ -243,7 +243,7 @@ fn find_browser_pid(profile_dir: &PathBuf, url: &str, bidi_port: u16) -> Result<
     ))
 }
 
-fn cleanup_existing_profile_processes(profile_dir: &PathBuf) -> Result<()> {
+fn cleanup_existing_profile_processes(profile_dir: &Path) -> Result<()> {
     let profile_text = profile_dir.display().to_string();
     session::clear_browser_session_state();
     let output = Command::new("ps")

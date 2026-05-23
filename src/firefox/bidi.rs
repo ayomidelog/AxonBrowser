@@ -647,7 +647,9 @@ impl BidiSession {
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
-        Err(anyhow!("timed out waiting for Firefox window.open tab creation"))
+        Err(anyhow!(
+            "timed out waiting for Firefox window.open tab creation"
+        ))
     }
 }
 

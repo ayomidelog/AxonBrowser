@@ -157,13 +157,13 @@ async fn resolve_chain(chain: &[&str]) -> Result<Vec<LiveNode>> {
     let selectors = selector::parse_selector_chain(&raw)?;
     let mut saw_nodes = false;
     for query in browser_root_queries() {
-        if let Ok(nodes) = inspect::resolve(&query, &selectors).await {
-            if !nodes.is_empty() {
-                saw_nodes = true;
-                let scoped = scope_nodes_to_browser_window(nodes).await?;
-                if !scoped.is_empty() {
-                    return Ok(scoped);
-                }
+        if let Ok(nodes) = inspect::resolve(&query, &selectors).await
+            && !nodes.is_empty()
+        {
+            saw_nodes = true;
+            let scoped = scope_nodes_to_browser_window(nodes).await?;
+            if !scoped.is_empty() {
+                return Ok(scoped);
             }
         }
     }

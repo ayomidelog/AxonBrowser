@@ -1,4 +1,4 @@
-use std::{process::{Command, Stdio}};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, anyhow};
 

@@ -10,19 +10,44 @@ use super::find;
 use super::root;
 use super::root::PageScope;
 
+/// Wait conditions for page-level assertions.
+#[derive(Debug, Clone, Copy)]
+pub struct PageWaitConditions<'a> {
+    pub text: Option<&'a str>,
+    pub title_contains: Option<&'a str>,
+    pub url_contains: Option<&'a str>,
+    pub disappear: bool,
+}
+
+/// Polling controls for page waits.
+#[derive(Debug, Clone, Copy)]
+pub struct PageWaitTiming {
+    pub timeout_ms: u64,
+    pub poll_ms: u64,
+}
+
 pub async fn wait_for_target(
     scope: &PageScope,
     raw_selectors: &[String],
-    text: Option<&str>,
-    title_contains: Option<&str>,
-    url_contains: Option<&str>,
-    disappear: bool,
-    timeout_ms: u64,
-    poll_ms: u64,
+    conditions: PageWaitConditions<'_>,
+    timing: PageWaitTiming,
 ) -> Result<String> {
-    let target = classify_wait(raw_selectors, text, title_contains, url_contains, false)?
-        .expect("allow_empty=false guarantees a target");
-    wait_for_kind(scope, target, disappear, timeout_ms, poll_ms).await
+    let target = classify_wait(
+        raw_selectors,
+        conditions.text,
+        conditions.title_contains,
+        conditions.url_contains,
+        false,
+    )?
+    .expect("allow_empty=false guarantees a target");
+    wait_for_kind(
+        scope,
+        target,
+        conditions.disappear,
+        timing.timeout_ms,
+        timing.poll_ms,
+    )
+    .await
 }
 
 pub async fn wait_for_state(
@@ -79,20 +104,28 @@ pub async fn wait_for_state(
 pub async fn wait_for_optional_target(
     scope: &PageScope,
     raw_selectors: &[String],
-    text: Option<&str>,
-    title_contains: Option<&str>,
-    url_contains: Option<&str>,
-    disappear: bool,
-    timeout_ms: u64,
-    poll_ms: u64,
+    conditions: PageWaitConditions<'_>,
+    timing: PageWaitTiming,
 ) -> Result<Option<String>> {
-    let Some(target) = classify_wait(raw_selectors, text, title_contains, url_contains, true)?
+    let Some(target) = classify_wait(
+        raw_selectors,
+        conditions.text,
+        conditions.title_contains,
+        conditions.url_contains,
+        true,
+    )?
     else {
         return Ok(None);
     };
-    wait_for_kind(scope, target, disappear, timeout_ms, poll_ms)
-        .await
-        .map(Some)
+    wait_for_kind(
+        scope,
+        target,
+        conditions.disappear,
+        timing.timeout_ms,
+        timing.poll_ms,
+    )
+    .await
+    .map(Some)
 }
 
 enum PageWaitTarget {

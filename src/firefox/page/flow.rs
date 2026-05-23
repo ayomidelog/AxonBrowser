@@ -4,34 +4,25 @@ use crate::firefox::{goto, wait as firefox_wait};
 
 use super::{actions, root::PageScope, wait};
 
+/// Wait request to apply after a page action completes.
+#[derive(Debug, Clone, Copy)]
+pub struct PostActionWait<'a> {
+    pub scope: &'a PageScope,
+    pub selectors: &'a [String],
+    pub conditions: wait::PageWaitConditions<'a>,
+    pub timing: wait::PageWaitTiming,
+}
+
 pub async fn click_and_wait(
     action_scope: &PageScope,
     action_selectors: &[String],
-    wait_scope: &PageScope,
-    wait_selectors: &[String],
-    text: Option<&str>,
-    title_contains: Option<&str>,
-    url_contains: Option<&str>,
-    disappear: bool,
-    timeout_ms: u64,
-    poll_ms: u64,
+    wait_request: PostActionWait<'_>,
 ) -> Result<String> {
     let title_before = firefox_wait::current_title().await.ok();
     let url_before = firefox_wait::current_url().await.ok();
     let action_summary = actions::click(action_scope, action_selectors, None).await?;
-    let wait_summary = wait_after_action(
-        wait_scope,
-        wait_selectors,
-        text,
-        title_contains,
-        url_contains,
-        disappear,
-        title_before.as_deref(),
-        url_before.as_deref(),
-        timeout_ms,
-        poll_ms,
-    )
-    .await?;
+    let wait_summary =
+        wait_after_action(wait_request, title_before.as_deref(), url_before.as_deref()).await?;
 
     Ok(format!(
         "page click-and-wait | {} | {}",
@@ -42,31 +33,13 @@ pub async fn click_and_wait(
 pub async fn submit_and_wait(
     action_scope: &PageScope,
     action_selectors: &[String],
-    wait_scope: &PageScope,
-    wait_selectors: &[String],
-    text: Option<&str>,
-    title_contains: Option<&str>,
-    url_contains: Option<&str>,
-    disappear: bool,
-    timeout_ms: u64,
-    poll_ms: u64,
+    wait_request: PostActionWait<'_>,
 ) -> Result<String> {
     let title_before = firefox_wait::current_title().await.ok();
     let url_before = firefox_wait::current_url().await.ok();
     let action_summary = actions::press_enter(action_scope, action_selectors).await?;
-    let wait_summary = wait_after_action(
-        wait_scope,
-        wait_selectors,
-        text,
-        title_contains,
-        url_contains,
-        disappear,
-        title_before.as_deref(),
-        url_before.as_deref(),
-        timeout_ms,
-        poll_ms,
-    )
-    .await?;
+    let wait_summary =
+        wait_after_action(wait_request, title_before.as_deref(), url_before.as_deref()).await?;
 
     Ok(format!(
         "page submit-and-wait | {} | {}",
@@ -75,37 +48,33 @@ pub async fn submit_and_wait(
 }
 
 async fn wait_after_action(
-    wait_scope: &PageScope,
-    wait_selectors: &[String],
-    text: Option<&str>,
-    title_contains: Option<&str>,
-    url_contains: Option<&str>,
-    disappear: bool,
+    wait_request: PostActionWait<'_>,
     title_before: Option<&str>,
     url_before: Option<&str>,
-    timeout_ms: u64,
-    poll_ms: u64,
 ) -> Result<String> {
     if let Some(summary) = wait::wait_for_optional_target(
-        wait_scope,
-        wait_selectors,
-        text,
-        title_contains,
-        url_contains,
-        disappear,
-        timeout_ms,
-        poll_ms,
+        wait_request.scope,
+        wait_request.selectors,
+        wait_request.conditions,
+        wait_request.timing,
     )
     .await?
     {
         return Ok(summary);
     }
 
-    if disappear {
+    if wait_request.conditions.disappear {
         bail!(
             "--disappear needs --text, --title-contains, --url-contains, or one or more --wait-selector values"
         );
     }
 
-    goto::wait_for_page_change(title_before, url_before, None, timeout_ms, poll_ms).await
+    goto::wait_for_page_change(
+        title_before,
+        url_before,
+        None,
+        wait_request.timing.timeout_ms,
+        wait_request.timing.poll_ms,
+    )
+    .await
 }

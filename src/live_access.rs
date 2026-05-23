@@ -45,10 +45,10 @@ pub async fn scroll_into_view(node: &LiveNode) -> Result<bool> {
         .context("failed to inspect matched node interfaces")?;
 
     if let Ok(component) = proxies.component().await {
-        if let Ok(scrolled) = component.scroll_to(ScrollType::Anywhere).await {
-            if scrolled {
-                return Ok(true);
-            }
+        if let Ok(scrolled) = component.scroll_to(ScrollType::Anywhere).await
+            && scrolled
+        {
+            return Ok(true);
         }
 
         if let Ok((x, y, width, height)) = component.get_extents(CoordType::Screen).await {
@@ -57,24 +57,20 @@ pub async fn scroll_into_view(node: &LiveNode) -> Result<bool> {
             if let Ok(scrolled) = component
                 .scroll_to_point(CoordType::Screen, target_x, target_y)
                 .await
+                && scrolled
             {
-                if scrolled {
-                    return Ok(true);
-                }
+                return Ok(true);
             }
         }
     }
 
-    if let Ok(text) = proxies.text().await {
-        if let Ok(count) = text.character_count().await {
-            if count > 0 {
-                if let Ok(scrolled) = text.scroll_substring_to(0, count, 6).await {
-                    if scrolled {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
+    if let Ok(text) = proxies.text().await
+        && let Ok(count) = text.character_count().await
+        && count > 0
+        && let Ok(scrolled) = text.scroll_substring_to(0, count, 6).await
+        && scrolled
+    {
+        return Ok(true);
     }
 
     Ok(false)

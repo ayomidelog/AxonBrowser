@@ -182,10 +182,10 @@ fn session_is_usable(env: &BTreeMap<String, String>) -> bool {
         return false;
     }
 
-    if let Some(dir) = env.get(HEADLESS_SESSION_DIR_ENV) {
-        if !pid_file_is_alive(Path::new(dir).join("xvfb.pid").as_path()) {
-            return false;
-        }
+    if let Some(dir) = env.get(HEADLESS_SESSION_DIR_ENV)
+        && !pid_file_is_alive(Path::new(dir).join("xvfb.pid").as_path())
+    {
+        return false;
     }
 
     if let Some(pid) = env.get("DBUS_SESSION_BUS_PID") {
@@ -250,15 +250,13 @@ fn cleanup_session_outputs(dir: &Path) -> Result<()> {
         }
     }
     let env_path = dir.join(SESSION_ENV_NAME);
-    if env_path.exists() {
-        if let Ok(env) = parse_env_file(&env_path) {
-            if let Some(pid) = env
-                .get("DBUS_SESSION_BUS_PID")
-                .and_then(|value| value.parse::<u32>().ok())
-            {
-                let _ = terminate_pid(pid);
-            }
-        }
+    if env_path.exists()
+        && let Ok(env) = parse_env_file(&env_path)
+        && let Some(pid) = env
+            .get("DBUS_SESSION_BUS_PID")
+            .and_then(|value| value.parse::<u32>().ok())
+    {
+        let _ = terminate_pid(pid);
     }
     let _ = terminate_accessibility_processes();
     let _ = fs::remove_file(dir.join(SESSION_ENV_NAME));
@@ -622,10 +620,10 @@ fn find_background_pid(
         if !args.iter().all(|arg| cmdline.contains(arg)) {
             continue;
         }
-        if let Some(display) = display_filter.as_deref() {
-            if !cmdline.contains(display) {
-                continue;
-            }
+        if let Some(display) = display_filter.as_deref()
+            && !cmdline.contains(display)
+        {
+            continue;
         }
         if let Ok(pid) = pid_text.parse::<u32>() {
             return Ok(Some(pid));

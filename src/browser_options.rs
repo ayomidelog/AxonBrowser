@@ -280,8 +280,6 @@ async fn node_center(node: &LiveNode) -> Result<Option<(i32, i32)>> {
         Err(_) => return Ok(None),
     };
 
-    let width = i32::try_from(width).unwrap_or(i32::MAX);
-    let height = i32::try_from(height).unwrap_or(i32::MAX);
     Ok(Some((x + (width / 2), y + (height / 2))))
 }
 

@@ -14,10 +14,10 @@ pub fn find_edge_window(query_override: Option<&str>) -> Result<WindowMatch> {
             .ok_or_else(|| anyhow!("no visible Microsoft Edge window found"));
     }
 
-    if let Some(target_id) = session::read_target() {
-        if let Ok(window) = find_edge_window_by_id(&target_id) {
-            return Ok(window);
-        }
+    if let Some(target_id) = session::read_target()
+        && let Ok(window) = find_edge_window_by_id(&target_id)
+    {
+        return Ok(window);
     }
 
     list_edge_windows(None)?

@@ -25,14 +25,13 @@ pub async fn type_text(locator_raw: &str, text: &str) -> Result<String> {
             );
         }
     }
-    let input_mode = if target.is_address_bar() {
-        "clipboard paste"
-    } else {
-        "clipboard paste"
-    };
-
     Ok(format!(
         "typed into {} via {} in window {} ({}, {}, focus: {})",
-        target.label, input_mode, browser_window.id, target.path, activation_note, focus_summary
+        target.label,
+        "clipboard paste",
+        browser_window.id,
+        target.path,
+        activation_note,
+        focus_summary
     ))
 }

@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -183,8 +183,8 @@ fn is_launch_candidate(window: &crate::window::WindowMatch) -> bool {
 
 fn spawn_browser(
     browser_binary: &str,
-    profile_dir: &PathBuf,
-    log_path: &PathBuf,
+    profile_dir: &Path,
+    log_path: &Path,
     url: &str,
 ) -> Result<u32> {
     let stdout = File::create(log_path)
@@ -222,7 +222,7 @@ fn spawn_browser(
     find_browser_pid(profile_dir, url)
 }
 
-fn find_browser_pid(profile_dir: &PathBuf, url: &str) -> Result<u32> {
+fn find_browser_pid(profile_dir: &Path, url: &str) -> Result<u32> {
     let profile_arg = edge_profile_arg(profile_dir);
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_secs(3) {
@@ -250,7 +250,7 @@ fn find_browser_pid(profile_dir: &PathBuf, url: &str) -> Result<u32> {
     ))
 }
 
-fn cleanup_existing_profile_processes(profile_dir: &PathBuf) -> Result<()> {
+fn cleanup_existing_profile_processes(profile_dir: &Path) -> Result<()> {
     let profile_arg = edge_profile_arg(profile_dir);
     session::clear_browser_session_state();
     let output = Command::new("pgrep")
@@ -287,7 +287,7 @@ fn cleanup_existing_profile_processes(profile_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn edge_profile_arg(profile_dir: &PathBuf) -> String {
+fn edge_profile_arg(profile_dir: &Path) -> String {
     format!("--user-data-dir={}", profile_dir.display())
 }
 
