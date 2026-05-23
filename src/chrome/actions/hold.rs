@@ -43,7 +43,7 @@ fn active_or_browser_window(
             crate::window::list_visible_windows()
                 .ok()?
                 .into_iter()
-                .find(|window| window.id == id)
+                .find(|window| window.id == id && window.id == browser_window.id)
         })
         .or_else(|| Some(browser_window.clone()))
         .ok_or_else(|| anyhow::anyhow!("failed to resolve browser window for key hold"))

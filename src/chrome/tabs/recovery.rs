@@ -81,17 +81,6 @@ pub async fn wait_for_close_recovery(
                     ));
                 }
 
-                if tabs.len() == 1
-                    && tabs[0].title != "Guibot Page Demo"
-                    && tabs[0].title != "Example Domain"
-                {
-                    return Ok(format!(
-                        "chrome tab recovered after close by replacing content after {}ms ({} attempts)",
-                        start.elapsed().as_millis(),
-                        attempts
-                    ));
-                }
-
                 if start.elapsed() >= timeout {
                     break format!(
                         "target {} still present; tab count still {}",
@@ -107,6 +96,14 @@ pub async fn wait_for_close_recovery(
                         start.elapsed().as_millis(),
                         attempts
                     ));
+                }
+
+                if err.to_string().contains("no chrome tabs matched") {
+                    if start.elapsed() >= timeout {
+                        break err.to_string();
+                    }
+                    sleep(interval).await;
+                    continue;
                 }
 
                 if start.elapsed() >= timeout {

@@ -37,7 +37,7 @@ pub async fn close(index: Option<usize>) -> Result<String> {
         let _ = devtools::activate_page(&fallback_id).await;
     }
     let recovery_summary =
-        recovery::wait_for_close_recovery(&target.id, previous_count, 4_000, 150).await?;
+        recovery::wait_for_close_recovery(&target.id, previous_count, 12_000, 150).await?;
 
     Ok(format!(
         "closed edge tab {} ({:?}) | {}",

@@ -1,10 +1,10 @@
+use std::time::Duration;
+
 use anyhow::{Result, anyhow, bail};
 use atspi::State;
+use tokio::time::sleep;
 
-use crate::{
-    chrome::{actions::click::click_target_node, page::root::PageScope},
-    selector,
-};
+use crate::{chrome::{actions::click::click_target_node, page::root::PageScope}, selector};
 
 use super::target::PageActionTarget;
 
@@ -73,9 +73,7 @@ async fn set_toggle(
     }
 
     let action_summary = click_target_node(&target.node, &target.label, &target.path).await?;
-    let updated = target.state_set().await?;
-    let checked_now = is_checked(updated);
-    if checked_now != desired_checked {
+    if !wait_for_checked_state(scope, raw_selectors, desired_checked).await? {
         bail!(
             "toggle state for {} did not change to {}",
             target.label,
@@ -107,6 +105,21 @@ fn is_checked(states: atspi::StateSet) -> bool {
     states.contains(State::Checked)
         || states.contains(State::Selected)
         || states.contains(State::Pressed)
+}
+
+async fn wait_for_checked_state(
+    scope: &PageScope,
+    raw_selectors: &[String],
+    desired_checked: bool,
+) -> Result<bool> {
+    for _ in 0..15 {
+        let target = PageActionTarget::resolve(scope, raw_selectors).await?;
+        if is_checked(target.state_set().await?) == desired_checked {
+            return Ok(true);
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    Ok(false)
 }
 
 fn attach_notes(summary: String, notes: &[String]) -> String {

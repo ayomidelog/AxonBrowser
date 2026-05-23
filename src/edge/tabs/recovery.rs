@@ -90,6 +90,16 @@ pub async fn wait_for_close_recovery(
                     ));
                 }
 
+                if err.to_string().contains("no edge tabs matched")
+                    || err.to_string().contains("no chrome tabs matched")
+                {
+                    if start.elapsed() >= timeout {
+                        break err.to_string();
+                    }
+                    sleep(interval).await;
+                    continue;
+                }
+
                 if start.elapsed() >= timeout {
                     break err.to_string();
                 }
