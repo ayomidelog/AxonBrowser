@@ -128,6 +128,7 @@ pub async fn wait_for_optional_target(
     .map(Some)
 }
 
+#[derive(Debug)]
 enum PageWaitTarget {
     Text(String),
     Selector(Vec<selector::Selector>),
@@ -585,4 +586,42 @@ fn normalize_text(input: &str) -> String {
 
 fn normalize_fragment(input: &str) -> String {
     normalize_text(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use atspi::{State, StateSet};
+
+    use super::{PageStateWait, PageWaitTarget, classify_wait};
+
+    #[test]
+    fn test_classify_wait_parses_title_condition() {
+        let target = classify_wait(&[], None, Some("Settings"), None, false).unwrap();
+
+        assert!(matches!(
+            target,
+            Some(PageWaitTarget::TitleContains(value)) if value == "settings"
+        ));
+    }
+
+    #[test]
+    fn test_classify_wait_rejects_selector_and_url_condition_together() {
+        let selectors = vec!["Button:Continue".to_string()];
+        let err = classify_wait(&selectors, None, None, Some("mozilla.org"), false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("page wait needs exactly one of selector chain"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_page_state_wait_collapsed_and_expanded_are_distinct() {
+        let expanded = StateSet::new(State::Expanded);
+        let collapsed = StateSet::new(State::Collapsed);
+
+        assert!(PageStateWait::Expanded.matches(expanded));
+        assert!(PageStateWait::Collapsed.matches(collapsed));
+        assert!(!PageStateWait::Collapsed.matches(expanded));
+    }
 }

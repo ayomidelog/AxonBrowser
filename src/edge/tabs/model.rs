@@ -103,11 +103,14 @@ mod tests {
         let first = fake_tab("one", "one", "https://one");
         let second = fake_tab("two", "two", "https://two");
         let tabs = build_tab_infos(&[first.clone(), second.clone()], Some("two"));
-        assert!(!tabs[0].is_current);
-        assert!(tabs[1].is_current);
+        assert_eq!(tabs.iter().filter(|tab| tab.is_current).count(), 1);
+        assert_eq!(tabs[0].id, "two");
+        assert!(tabs[0].is_current);
+        assert_eq!(tabs[1].id, "one");
+        assert!(!tabs[1].is_current);
         let rendered = render_tabs(&tabs);
-        assert!(rendered.contains("- tab 0: one"));
-        assert!(rendered.contains("* tab 1: two"));
+        assert!(rendered.contains("* tab 0: two"));
+        assert!(rendered.contains("- tab 1: one"));
     }
 
     #[test]

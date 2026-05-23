@@ -128,6 +128,7 @@ pub async fn wait_for_optional_target(
     .map(Some)
 }
 
+#[derive(Debug)]
 enum PageWaitTarget {
     Text(String),
     Selector(Vec<selector::Selector>),
@@ -602,5 +603,79 @@ fn canonical_browser_url(raw: &str) -> String {
         rest.to_string()
     } else {
         lower
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use atspi::{State, StateSet};
+
+    use super::{PageStateWait, PageWaitTarget, classify_wait};
+
+    #[test]
+    fn test_classify_wait_rejects_missing_target() {
+        let err = classify_wait(&[], None, None, None, false).unwrap_err();
+        assert!(
+            err.to_string().contains("page wait needs a selector chain"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_classify_wait_allows_empty_target_when_requested() {
+        let result = classify_wait(&[], None, None, None, true).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_classify_wait_parses_text_shorthand() {
+        let selectors = vec!["text: Save changes".to_string()];
+        let target = classify_wait(&selectors, None, None, None, false).unwrap();
+
+        assert!(matches!(
+            target,
+            Some(PageWaitTarget::Text(value)) if value == "save changes"
+        ));
+    }
+
+    #[test]
+    fn test_classify_wait_rejects_ambiguous_inputs() {
+        let selectors = vec!["Button:Save".to_string()];
+        let err = classify_wait(&selectors, Some("saved"), None, None, false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("page wait needs exactly one of selector chain"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_classify_wait_prefers_selector_chain_when_present() {
+        let selectors = vec!["Button:Save".to_string()];
+        let target = classify_wait(&selectors, None, None, None, false).unwrap();
+
+        assert!(matches!(
+            target,
+            Some(PageWaitTarget::Selector(parsed))
+                if parsed.len() == 1
+                    && parsed[0].role.as_deref() == Some("push button")
+        ));
+    }
+
+    #[test]
+    fn test_page_state_wait_checked_matches_selected_and_pressed() {
+        assert!(PageStateWait::Checked.matches(StateSet::new(State::Selected)));
+        assert!(PageStateWait::Checked.matches(StateSet::new(State::Pressed)));
+        assert!(!PageStateWait::Checked.matches(StateSet::empty()));
+    }
+
+    #[test]
+    fn test_page_state_wait_disabled_matches_missing_enabled_state() {
+        let enabled = StateSet::new(State::Enabled | State::Sensitive);
+        let disabled = StateSet::new(State::Sensitive);
+
+        assert!(PageStateWait::Enabled.matches(enabled));
+        assert!(PageStateWait::Disabled.matches(disabled));
+        assert!(!PageStateWait::Disabled.matches(enabled));
     }
 }
