@@ -102,10 +102,7 @@ fn is_primary_browser_window(window: &WindowMatch) -> bool {
 }
 
 fn is_active_window(window: &WindowMatch) -> bool {
-    window::active_window_id()
-        .ok()
-        .as_deref()
-        == Some(window.id.as_str())
+    window::active_window_id().ok().as_deref() == Some(window.id.as_str())
 }
 
 fn is_browser_window_name(name: &str) -> bool {

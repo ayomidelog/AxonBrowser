@@ -197,7 +197,11 @@ fn browser_root_queries() -> Vec<String> {
     if let Ok(window) = chrome_window::find_browser_window(None) {
         queries.push(window.name);
     }
-    queries.extend(BROWSER_QUERY_CANDIDATES.iter().map(|value| value.to_string()));
+    queries.extend(
+        BROWSER_QUERY_CANDIDATES
+            .iter()
+            .map(|value| value.to_string()),
+    );
     queries
 }
 

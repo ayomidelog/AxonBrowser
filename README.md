@@ -1,11 +1,17 @@
 # axonbrowser
 
-Browser automation via the accessibility tree — Chrome, Edge, Firefox, and Camoufox.
+Browser automation for Chrome, Edge, Firefox, and Camoufox on Linux.
 
-Axonbrowser drives real browser windows through the OS accessibility bus (AT‑SPI).
-It operates at two levels: the **browser shell** (address bar, tabs, resize,
-navigation) and the **rendered page** (find, click, type, wait, form helpers,
-iframes, screenshots).
+Axonbrowser now runs in two layers:
+- browser shell control:
+  - Chrome and Edge use native Chromium DevTools
+  - Firefox and Camoufox use Firefox WebDriver BiDi
+- rendered page interaction:
+  - real accessibility/X11 actions through AT-SPI
+
+That means shell commands like `launch`, `current`, `goto`, `tabs`, and
+`screenshot` are browser-native, while page commands still do real clicks,
+typing, focus, waits, and reads against the live browser window.
 
 ---
 
@@ -13,7 +19,7 @@ iframes, screenshots).
 
 - Linux with X11 available, or a headless VPS where `axonbrowser` can start its own
   X11 session
-- Chrome/Chromium, Microsoft Edge, or Firefox
+- Chrome/Chromium, Microsoft Edge, Firefox, or Camoufox
 - AT-SPI support: `at-spi2-core` and `dbus-x11`
 - X11 helpers: `x11-utils`, `xdotool`, `xclip`
 - ImageMagick (`import` is used for screenshots)
@@ -28,7 +34,7 @@ No VNC server, `openbox`, `wmctrl`, or `xwd` is required.
 
 ```bash
 cargo build --release
-# binary lands at target/release/axonbrowser
+# binary: target/release/axonbrowser
 ```
 
 Local source builds require a Rust toolchain.
@@ -36,10 +42,10 @@ Local source builds require a Rust toolchain.
 ## Install
 
 ```bash
-# Install from a release bundle or from a local checkout
+# Install from a local checkout
 scripts/install-axonbrowser.sh
 
-# Optional local browser installers
+# Optional local browser installers used on this machine
 scripts/install-chrome-local.sh
 scripts/install-firefox-local.sh
 scripts/install-edge-local.sh
@@ -49,34 +55,28 @@ scripts/install-camoufox.sh
 `scripts/install-runtime-deps.sh` installs the runtime packages axonbrowser needs.
 On headless hosts it also installs `Xvfb`.
 
-If you install from the release tarball, Rust is not required. Extract the bundle,
-run `scripts/install-axonbrowser.sh`, and then use `axonbrowser --help`.
-
 ---
 
 ## Quick start
 
 ```bash
-# Launch a browser and navigate
-axonbrowser chrome launch
-axonbrowser chrome goto example.com
+cargo build
 
-# Inspect the current window and capture a screenshot
-axonbrowser chrome current
-axonbrowser chrome screenshot artifacts/chrome.png
+# Launch a browser
+./target/debug/axonbrowser chrome launch
+./target/debug/axonbrowser edge launch
+./target/debug/axonbrowser firefox launch
+./target/debug/axonbrowser camoufox launch
 
-# Page interactions
-axonbrowser chrome page find "Heading:Example Domain"
-axonbrowser chrome page click "Button:Sign in"
-axonbrowser chrome page type "Text Box:Email" "user@example.com"
-axonbrowser chrome page wait --text "Welcome"
-axonbrowser chrome page screenshot artifacts/shot.png
+# Navigate and inspect
+./target/debug/axonbrowser chrome goto example.com
+./target/debug/axonbrowser edge current --json
+./target/debug/axonbrowser firefox tabs list
+./target/debug/axonbrowser camoufox screenshot artifacts/camoufox.png
 
-# Edge, Firefox, and Camoufox use the same command surface
-axonbrowser edge launch
-axonbrowser firefox launch
-axonbrowser camoufox launch
-axonbrowser firefox goto example.com
+# Real page interaction
+./target/debug/axonbrowser chrome page click "Button:Submit"
+./target/debug/axonbrowser firefox page type "Text Box:Email" "user@example.com"
 ```
 
 ### VPS / headless
@@ -97,6 +97,12 @@ Run `axonbrowser --help` for the full command tree.
 
 The core browser commands are shared by all four browser entry points (`chrome`,
 `edge`, `firefox`, `camoufox`).
+
+Verified native shell coverage in the current tree:
+- Chrome: `launch`, `current`, `goto`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
+- Edge: `launch`, `current`, `goto`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
+- Firefox: `launch`, `current`, `goto`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
+- Camoufox: `launch`, `current`, `goto`, `goto --new-tab`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
 
 ### Launch / attach
 

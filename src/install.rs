@@ -7,7 +7,8 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 
-const CHROME_DEB_URL: &str = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
+const CHROME_DEB_URL: &str =
+    "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
 const FIREFOX_TAR_URL: &str =
     "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US";
 const EDGE_PACKAGE_INDEX_URL: &str =
@@ -45,13 +46,7 @@ pub fn install_deps() -> Result<()> {
 }
 
 fn install_runtime_packages(distro: &Distro, need_headless: bool) -> Result<()> {
-    let mut packages = vec![
-        "imagemagick",
-        "xclip",
-        "xdotool",
-        "curl",
-        "ca-certificates",
-    ];
+    let mut packages = vec!["imagemagick", "xclip", "xdotool", "curl", "ca-certificates"];
 
     match distro.package_manager {
         PackageManager::Apt => {
@@ -80,7 +75,13 @@ fn install_runtime_packages(distro: &Distro, need_headless: bool) -> Result<()> 
             run_privileged("dnf", &args)?;
         }
         PackageManager::Pacman => {
-            packages.extend(["at-spi2-core", "dbus", "python", "python-pip", "xorg-xdpyinfo"]);
+            packages.extend([
+                "at-spi2-core",
+                "dbus",
+                "python",
+                "python-pip",
+                "xorg-xdpyinfo",
+            ]);
             if need_headless {
                 packages.extend(["xorg-server-xvfb"]);
             }
@@ -135,7 +136,15 @@ fn install_firefox_local() -> Result<()> {
 
     let extract_dir = workdir.join("extract");
     fs::create_dir_all(&extract_dir)?;
-    run_command("tar", &["-xf", &tar_path.display().to_string(), "-C", &extract_dir.display().to_string()])?;
+    run_command(
+        "tar",
+        &[
+            "-xf",
+            &tar_path.display().to_string(),
+            "-C",
+            &extract_dir.display().to_string(),
+        ],
+    )?;
 
     let source_dir = extract_dir.join("firefox");
     let prefix = local_opt_dir().join("firefox");
@@ -170,10 +179,7 @@ fn install_camoufox_local() -> Result<()> {
     ensure_commands(["python3"])?;
     let venv_dir = local_share_dir().join("camoufox-venv");
     if !venv_dir.exists() {
-        run_command(
-            "python3",
-            &["-m", "venv", &venv_dir.display().to_string()],
-        )?;
+        run_command("python3", &["-m", "venv", &venv_dir.display().to_string()])?;
     }
 
     let pip = venv_dir.join("bin/pip");
@@ -188,7 +194,9 @@ fn install_camoufox_local() -> Result<()> {
     )?;
 
     let bin = run_capture(
-        python.to_str().ok_or_else(|| anyhow!("invalid python path"))?,
+        python
+            .to_str()
+            .ok_or_else(|| anyhow!("invalid python path"))?,
         &["-m", "camoufox", "path"],
     )?;
     let resolved = bin.trim();
@@ -201,7 +209,7 @@ fn install_camoufox_local() -> Result<()> {
     fs::write(
         &wrapper_path,
         format!(
-            "#!/usr/bin/env bash\nset -euo pipefail\nexec \"{}\" \"$@\"\n",
+            "#!/usr/bin/env bash\nset -euo pipefail\nBIN=\"{}\"\nif [[ -d \"$BIN\" ]]; then\n  BIN=\"$BIN/camoufox\"\nfi\nexec \"$BIN\" \"$@\"\n",
             resolved
         ),
     )?;
@@ -233,7 +241,9 @@ fn unpack_deb(deb_path: &Path, unpack_dir: &Path) -> Result<()> {
         "ar",
         &[
             "x",
-            deb_path.to_str().ok_or_else(|| anyhow!("invalid deb path"))?,
+            deb_path
+                .to_str()
+                .ok_or_else(|| anyhow!("invalid deb path"))?,
         ],
         Some(unpack_dir),
     )?;
@@ -252,7 +262,9 @@ fn unpack_deb(deb_path: &Path, unpack_dir: &Path) -> Result<()> {
         "tar",
         &[
             "-xf",
-            archive.to_str().ok_or_else(|| anyhow!("invalid archive path"))?,
+            archive
+                .to_str()
+                .ok_or_else(|| anyhow!("invalid archive path"))?,
         ],
         Some(unpack_dir),
     )
@@ -263,13 +275,16 @@ fn install_tree(source: &Path, dest: &Path) -> Result<()> {
         bail!("source install tree missing: {}", source.display());
     }
     if dest.exists() {
-        fs::remove_dir_all(dest)
-            .with_context(|| format!("failed to remove {}", dest.display()))?;
+        fs::remove_dir_all(dest).with_context(|| format!("failed to remove {}", dest.display()))?;
     }
     fs::create_dir_all(dest.parent().unwrap_or_else(|| Path::new("/")))?;
     run_command_in(
         "cp",
-        &["-a", &format!("{}/.", source.display()), &dest.display().to_string()],
+        &[
+            "-a",
+            &format!("{}/.", source.display()),
+            &dest.display().to_string(),
+        ],
         None::<&Path>,
     )
 }
@@ -302,7 +317,13 @@ fn make_executable(path: &Path) -> Result<()> {
 fn download_to(url: &str, dest: &Path) -> Result<()> {
     run_command(
         "curl",
-        &["-fsSL", url, "-o", dest.to_str().ok_or_else(|| anyhow!("invalid download path"))?],
+        &[
+            "-fsSL",
+            url,
+            "-o",
+            dest.to_str()
+                .ok_or_else(|| anyhow!("invalid download path"))?,
+        ],
     )
 }
 
@@ -310,7 +331,10 @@ fn run_privileged(program: &str, args: &[&str]) -> Result<()> {
     let use_sudo = !is_root();
     let mut command = if use_sudo {
         if !command_exists("sudo") {
-            bail!("{} requires root privileges and sudo is not available", program);
+            bail!(
+                "{} requires root privileges and sudo is not available",
+                program
+            );
         }
         let mut cmd = Command::new("sudo");
         cmd.arg(program);

@@ -177,7 +177,8 @@ fn nodes_iter<'a>(
     nodes: &'a [LiveNode],
     selectors: &'a [selector::Selector],
 ) -> impl Iterator<Item = LiveNode> + 'a {
-    nodes.iter()
+    nodes
+        .iter()
         .filter(move |node| selectors.iter().any(|selector| selector.matches_live(node)))
         .cloned()
 }

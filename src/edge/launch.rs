@@ -10,7 +10,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use tokio::time::sleep;
 
-use super::{session, window};
+use super::{devtools, session, window};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EdgeLaunchState {
@@ -60,13 +60,13 @@ pub async fn launch_and_wait(
     poll_ms: u64,
 ) -> Result<EdgeLaunchState> {
     let url = normalize_launch_url(initial_url.unwrap_or("about:blank"))?;
+    let profile_dir = prepare_profile_dir(profile_override)?;
+    cleanup_existing_profile_processes(&profile_dir)?;
     let baseline: HashSet<String> = window::list_edge_windows(None)
         .unwrap_or_default()
         .into_iter()
         .map(|window| window.id)
         .collect();
-
-    let profile_dir = prepare_profile_dir(profile_override)?;
     let log_path = unique_path("axonbrowser-edge-launch", "log");
     let browser_binary = find_edge_binary()?;
     let pid = spawn_browser(&browser_binary, &profile_dir, &log_path, &url)?;
@@ -76,9 +76,32 @@ pub async fn launch_and_wait(
     let interval = Duration::from_millis(poll_ms.max(1));
 
     loop {
-        if let Some(window_match) = detect_new_window(&baseline)? {
-            session::remember_target(&window_match.id)?;
+        if let Some(window_match) = find_window_for_pid(pid)? {
             let _ = crate::window::activate_window(&window_match.id);
+            let _ = session::remember_browser_window_target(&window_match.id);
+            let _ = session::remember_browser_url(&url);
+            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+            let _ = remember_initial_devtools_tab(&url);
+            return Ok(EdgeLaunchState {
+                pid,
+                profile: profile_dir.display().to_string(),
+                log_path: log_path.display().to_string(),
+                url: url.clone(),
+                window_id: window_match.id,
+                window_title: window_match.name,
+                x: window_match.x,
+                y: window_match.y,
+                width: window_match.width,
+                height: window_match.height,
+            });
+        }
+
+        if let Some(window_match) = detect_new_window(&baseline)? {
+            let _ = crate::window::activate_window(&window_match.id);
+            let _ = session::remember_browser_window_target(&window_match.id);
+            let _ = session::remember_browser_url(&url);
+            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+            let _ = remember_initial_devtools_tab(&url);
             return Ok(EdgeLaunchState {
                 pid,
                 profile: profile_dir.display().to_string(),
@@ -94,6 +117,25 @@ pub async fn launch_and_wait(
         }
 
         if start.elapsed() >= timeout {
+            if let Some(window_match) = window::list_edge_windows(None)?.into_iter().next() {
+                let _ = crate::window::activate_window(&window_match.id);
+                let _ = session::remember_browser_window_target(&window_match.id);
+                let _ = session::remember_browser_url(&url);
+                let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+                let _ = remember_initial_devtools_tab(&url);
+                return Ok(EdgeLaunchState {
+                    pid,
+                    profile: profile_dir.display().to_string(),
+                    log_path: log_path.display().to_string(),
+                    url: url.clone(),
+                    window_id: window_match.id,
+                    window_title: window_match.name,
+                    x: window_match.x,
+                    y: window_match.y,
+                    width: window_match.width,
+                    height: window_match.height,
+                });
+            }
             bail!(
                 "timed out after {}ms waiting for a new edge window; log: {}",
                 timeout_ms,
@@ -107,11 +149,36 @@ pub async fn launch_and_wait(
 
 fn detect_new_window(baseline: &HashSet<String>) -> Result<Option<crate::window::WindowMatch>> {
     for window_match in window::list_edge_windows(None)? {
-        if !baseline.contains(&window_match.id) {
+        if is_launch_candidate(&window_match) && !baseline.contains(&window_match.id) {
             return Ok(Some(window_match));
         }
     }
     Ok(None)
+}
+
+fn find_window_for_pid(pid: u32) -> Result<Option<crate::window::WindowMatch>> {
+    let output = Command::new("xdotool")
+        .args(["search", "--onlyvisible", "--pid", &pid.to_string(), ".*"])
+        .output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let ids = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    Ok(window::list_edge_windows(None)?
+        .into_iter()
+        .find(|window| ids.iter().any(|id| id == &window.id)))
+}
+
+fn is_launch_candidate(window: &crate::window::WindowMatch) -> bool {
+    let normalized = crate::edge::window::normalize(&window.name);
+    !normalized.contains("clipboard") && window.width >= 200 && window.height >= 120
 }
 
 fn spawn_browser(
@@ -132,11 +199,12 @@ fn spawn_browser(
     Command::new("setsid")
         .arg("-f")
         .arg(browser_binary)
-        .arg(format!("--user-data-dir={}", profile_dir.display()))
+        .arg(edge_profile_arg(profile_dir))
         .args([
             "--no-first-run",
             "--no-default-browser-check",
             "--force-renderer-accessibility",
+            "--remote-debugging-port=0",
             "--new-window",
             "--window-size=1280,900",
             "--disable-background-networking",
@@ -155,13 +223,15 @@ fn spawn_browser(
 }
 
 fn find_browser_pid(profile_dir: &PathBuf, url: &str) -> Result<u32> {
-    let profile_text = profile_dir.display().to_string();
+    let profile_arg = edge_profile_arg(profile_dir);
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_secs(3) {
-        let output = Command::new("pgrep").args(["-af", "edge"]).output()?;
+        let output = Command::new("pgrep")
+            .args(["-af", "microsoft-edge|msedge"])
+            .output()?;
         if output.status.success() {
             for line in String::from_utf8_lossy(&output.stdout).lines() {
-                if !line.contains(&profile_text) || !line.contains(url) {
+                if !line.contains(&profile_arg) || !line.contains(url) {
                     continue;
                 }
                 if let Some((pid_text, _)) = line.trim().split_once(' ')
@@ -176,8 +246,79 @@ fn find_browser_pid(profile_dir: &PathBuf, url: &str) -> Result<u32> {
 
     Err(anyhow!(
         "failed to resolve launched edge pid for profile {}",
-        profile_text
+        profile_dir.display()
     ))
+}
+
+fn cleanup_existing_profile_processes(profile_dir: &PathBuf) -> Result<()> {
+    let profile_arg = edge_profile_arg(profile_dir);
+    session::clear_browser_session_state();
+    let output = Command::new("pgrep")
+        .args(["-af", "microsoft-edge|msedge"])
+        .output()
+        .context("failed to inspect existing edge processes")?;
+    if output.status.success() {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if !line.contains(&profile_arg) {
+                continue;
+            }
+            let Some((pid_text, _)) = line.trim().split_once(' ') else {
+                continue;
+            };
+            let Ok(pid) = pid_text.parse::<u32>() else {
+                continue;
+            };
+            let _ = terminate_pid(pid);
+        }
+    }
+
+    for name in [
+        "DevToolsActivePort",
+        "SingletonCookie",
+        "SingletonLock",
+        "SingletonSocket",
+    ] {
+        let path = profile_dir.join(name);
+        if path.exists() {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn edge_profile_arg(profile_dir: &PathBuf) -> String {
+    format!("--user-data-dir={}", profile_dir.display())
+}
+
+fn terminate_pid(pid: u32) -> Result<()> {
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(2) {
+        let alive = Command::new("sh")
+            .args(["-lc", &format!("kill -0 {pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !alive {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    Ok(())
 }
 
 fn find_edge_binary() -> Result<String> {
@@ -238,4 +379,12 @@ fn normalize_launch_url(raw: &str) -> Result<String> {
         return Ok(trimmed.to_string());
     }
     Ok(format!("https://{}", trimmed))
+}
+
+fn remember_initial_devtools_tab(url: &str) -> Result<()> {
+    if let Some(page) = devtools::current_page_with_hint(None, Some(url))? {
+        let _ = session::remember_browser_tab_target(&page.id);
+        let _ = session::remember_browser_url(&page.url);
+    }
+    Ok(())
 }

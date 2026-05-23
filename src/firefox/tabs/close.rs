@@ -1,8 +1,8 @@
 use anyhow::Result;
 
-use crate::{firefox::actions, window};
+use crate::firefox::bidi;
 
-use super::{model::resolve_tabs_with_current, switch};
+use super::model::resolve_tabs_with_current;
 
 pub async fn close(index: Option<usize>) -> Result<String> {
     let tabs = resolve_tabs_with_current().await?;
@@ -13,27 +13,5 @@ pub async fn close(index: Option<usize>) -> Result<String> {
             .unwrap_or(0)
     });
 
-    let preface = match tabs.iter().find(|tab| tab.index == target_index) {
-        Some(tab) if tab.is_current => {
-            format!(
-                "closing current firefox tab {} ({:?})",
-                tab.index, tab.title
-            )
-        }
-        Some(tab) => switch::switch(switch::TabSwitchTarget::Index(tab.index)).await?,
-        None => {
-            return Err(anyhow::anyhow!(
-                "firefox tab index {} is out of range",
-                target_index
-            ));
-        }
-    };
-
-    let focus_summary = actions::focus("window").await?;
-    window::send_key_active("ctrl+w")?;
-
-    Ok(format!(
-        "{} | {} | sent ctrl+w to active firefox window for tab {}",
-        preface, focus_summary, target_index
-    ))
+    bidi::close_context_by_index(target_index).await
 }

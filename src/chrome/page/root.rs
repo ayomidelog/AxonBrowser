@@ -10,12 +10,8 @@ use crate::{
 const PAGE_ROOT_CHAINS: &[&[&str]] = &[&["Document Web"], &["Root Web Area"]];
 const FRAME_ROLE_CANDIDATES: &[&str] = &["Frame", "Internal Frame"];
 const CHROME_BROWSER_QUERIES: &[&str] = &["google chrome", "chromium", "chromium-browser"];
-const EDGE_BROWSER_QUERIES: &[&str] = &[
-    "edge",
-    "microsoft edge",
-    "microsoft\u{200b} edge",
-    "msedge",
-];
+const EDGE_BROWSER_QUERIES: &[&str] =
+    &["edge", "microsoft edge", "microsoft\u{200b} edge", "msedge"];
 
 #[derive(Debug, Clone, Default)]
 pub struct PageScope {
@@ -137,7 +133,10 @@ async fn resolve_page_root_once() -> Result<LiveNode> {
 async fn resolve_page_root_from_edge_window() -> Result<LiveNode> {
     let window_root = crate::edge::actions::click::resolve_locator("window").await?;
     for chain in PAGE_ROOT_CHAINS {
-        let raw = chain.iter().map(|item| item.to_string()).collect::<Vec<_>>();
+        let raw = chain
+            .iter()
+            .map(|item| item.to_string())
+            .collect::<Vec<_>>();
         let selectors = selector::parse_selector_chain(&raw)?;
         let nodes = inspect::resolve_within_scope(&window_root, &selectors).await?;
         if let Some(node) = nodes.into_iter().next() {

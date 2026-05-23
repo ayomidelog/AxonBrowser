@@ -1,8 +1,11 @@
 use anyhow::{Result, anyhow};
 
-use crate::edge::actions;
+use crate::edge::devtools;
 
-use super::model::{TabInfo, resolve_tabs_with_current};
+use super::{
+    model::{TabInfo, resolve_tabs_with_current},
+    recovery,
+};
 
 #[derive(Debug, Clone)]
 pub enum TabSwitchTarget {
@@ -21,16 +24,12 @@ pub async fn switch(target: TabSwitchTarget) -> Result<String> {
         ));
     }
 
-    let summary = actions::click::click_target_node(
-        &target.node,
-        &format!("Page Tab: {:?}", target.title),
-        &target.node.path.join(" > "),
-    )
-    .await?;
+    devtools::activate_page(&target.id).await?;
+    let recovered = recovery::wait_for_current_tab(&target.id, 4_000, 150).await?;
 
     Ok(format!(
-        "switched to edge tab {} ({:?}) | {}",
-        target.index, target.title, summary
+        "switched to edge tab {} ({:?}) | settled on {:?}",
+        target.index, target.title, recovered.title
     ))
 }
 

@@ -107,5 +107,5 @@ async fn wait_after_action(
         );
     }
 
-    goto::wait_for_page_change(None, title_before, url_before, None, timeout_ms, poll_ms).await
+    goto::wait_for_page_change(title_before, url_before, None, timeout_ms, poll_ms).await
 }

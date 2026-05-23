@@ -117,7 +117,10 @@ pub async fn launch_and_wait(
         }
 
         if start.elapsed() >= timeout {
-            if let Some(window) = chrome_window::list_browser_windows(None)?.into_iter().next() {
+            if let Some(window) = chrome_window::list_browser_windows(None)?
+                .into_iter()
+                .next()
+            {
                 let _ = crate::window::activate_window(&window.id);
                 let _ = session::remember_browser_window_target(&window.id);
                 let _ = session::remember_browser_url(&url);

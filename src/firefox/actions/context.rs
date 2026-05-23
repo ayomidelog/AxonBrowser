@@ -1,8 +1,4 @@
-use std::{
-    process::{Command, Stdio},
-    thread,
-    time::Duration,
-};
+use std::{process::{Command, Stdio}};
 
 use anyhow::{Context, Result, anyhow};
 
@@ -82,22 +78,6 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn read_from_clipboard() -> Result<String> {
-    let output = Command::new("xclip")
-        .args(["-selection", "clipboard", "-o"])
-        .output()
-        .context("failed to read clipboard via xclip")?;
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "xclip failed to read clipboard: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 pub fn type_via_clipboard(window_id: &str, text: &str) -> Result<()> {
     copy_to_clipboard(text)?;
     let _ = activate_window_note(window_id);
@@ -109,12 +89,4 @@ pub fn type_via_clipboard(window_id: &str, text: &str) -> Result<()> {
 pub fn focus_address_bar(window_id: &str) -> Result<()> {
     let _ = activate_window_note(window_id);
     window::send_key(window_id, "ctrl+l")
-}
-
-pub fn read_address_bar_via_clipboard(window_id: &str) -> Result<String> {
-    focus_address_bar(window_id)?;
-    thread::sleep(Duration::from_millis(120));
-    window::send_key(window_id, "ctrl+c")?;
-    thread::sleep(Duration::from_millis(120));
-    read_from_clipboard()
 }

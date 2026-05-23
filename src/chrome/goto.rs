@@ -33,7 +33,10 @@ pub async fn navigate(
     let _ = session::remember_browser_url(&url);
 
     Ok(if new_tab {
-        format!("chrome goto {:?} in new tab | {} | {}", url, navigation, page_change)
+        format!(
+            "chrome goto {:?} in new tab | {} | {}",
+            url, navigation, page_change
+        )
     } else {
         format!("chrome goto {:?} | {} | {}", url, navigation, page_change)
     })

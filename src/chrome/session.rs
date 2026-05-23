@@ -27,12 +27,8 @@ pub fn read_browser_window_target() -> Option<String> {
 
 pub fn remember_browser_url(url: &str) -> Result<()> {
     let path = target_url_file();
-    fs::write(&path, url.trim()).with_context(|| {
-        format!(
-            "failed to write target browser url file {}",
-            path.display()
-        )
-    })
+    fs::write(&path, url.trim())
+        .with_context(|| format!("failed to write target browser url file {}", path.display()))
 }
 
 pub fn read_browser_url() -> Option<String> {
@@ -63,12 +59,8 @@ pub fn read_browser_profile() -> Option<String> {
 
 pub fn remember_browser_tab_target(target_id: &str) -> Result<()> {
     let path = target_tab_file();
-    fs::write(&path, target_id.trim()).with_context(|| {
-        format!(
-            "failed to write target browser tab file {}",
-            path.display()
-        )
-    })
+    fs::write(&path, target_id.trim())
+        .with_context(|| format!("failed to write target browser tab file {}", path.display()))
 }
 
 pub fn read_browser_tab_target() -> Option<String> {

@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow, bail};
 use tokio::time::sleep;
 
-use crate::edge::{actions, wait};
-use crate::{edge::window, window as x11_window};
+use crate::edge::{devtools, session, wait};
 
 pub async fn navigate(
     raw_url: &str,
@@ -13,44 +12,33 @@ pub async fn navigate(
     poll_ms: u64,
 ) -> Result<String> {
     let url = normalize_url(raw_url)?;
-    let locator_status = wait::wait_for_locator("address-bar", timeout_ms, poll_ms)
-        .await
-        .unwrap_or_else(|err| format!("address-bar locator unavailable ({})", err));
-
-    let tab_summary = if new_tab {
-        Some(match actions::click("new-tab").await {
-            Ok(summary) => summary,
-            Err(err) => open_new_tab_via_keyboard(&err.to_string())?,
-        })
-    } else {
-        None
-    };
 
     let title_before = wait::current_title().await.ok();
     let url_before = wait::current_url().await.ok();
-
-    let navigation = match actions::type_text("address-bar", &url).await {
-        Ok(type_summary) => {
-            let enter_summary = actions::press_enter(Some("address-bar")).await?;
-            let page_change = wait_for_page_change(
-                title_before.as_deref(),
-                url_before.as_deref(),
-                Some(&url),
-                timeout_ms,
-                poll_ms,
-            )
-            .await?;
-            format!("{} | {} | {}", type_summary, enter_summary, page_change)
-        }
-        Err(err) => navigate_via_keyboard(&url, timeout_ms, poll_ms, &err.to_string()).await?,
+    let navigation = if new_tab {
+        let page = devtools::new_page(&url).await?;
+        format!("devtools created target {} for {:?}", page.id, url)
+    } else {
+        let page = devtools::navigate(&url, title_before.as_deref(), url_before.as_deref()).await?;
+        format!("devtools navigated target {} to {:?}", page.id, url)
     };
+    let page_change = wait_for_page_change(
+        title_before.as_deref(),
+        url_before.as_deref(),
+        Some(&url),
+        timeout_ms,
+        poll_ms,
+    )
+    .await?;
+    let _ = session::remember_browser_url(&url);
 
-    Ok(match tab_summary {
-        Some(tab_summary) => format!(
-            "edge goto {:?} in new tab | {} | {} | {}",
-            url, locator_status, tab_summary, navigation
-        ),
-        None => format!("edge goto {:?} | {} | {}", url, locator_status, navigation),
+    Ok(if new_tab {
+        format!(
+            "edge goto {:?} in new tab | {} | {}",
+            url, navigation, page_change
+        )
+    } else {
+        format!("edge goto {:?} | {} | {}", url, navigation, page_change)
     })
 }
 
@@ -131,15 +119,19 @@ pub async fn wait_for_page_change(
 
 fn normalize_observed_url(raw: &str) -> String {
     let trimmed = raw.trim();
-    if trimmed.contains("://")
-        || trimmed.starts_with("about:")
-        || trimmed.starts_with("edge:")
-        || trimmed.starts_with("file:")
-        || trimmed.starts_with("data:")
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("about:")
+        || lower.starts_with("edge:")
+        || lower.starts_with("file:")
+        || lower.starts_with("data:")
     {
-        trimmed.to_string()
+        lower
+    } else if let Some(rest) = lower.strip_prefix("http://") {
+        rest.to_string()
+    } else if let Some(rest) = lower.strip_prefix("https://") {
+        rest.to_string()
     } else {
-        format!("http://{}", trimmed)
+        lower
     }
 }
 
@@ -160,43 +152,6 @@ fn normalize_url(raw_url: &str) -> Result<String> {
         return Ok(trimmed.to_string());
     }
     Ok(format!("https://{}", trimmed))
-}
-
-fn open_new_tab_via_keyboard(reason: &str) -> Result<String> {
-    let edge_window = window::find_edge_window(None)?;
-    let activation_note = crate::edge::actions::context::activate_window_note(&edge_window.id);
-    x11_window::send_key(&edge_window.id, "ctrl+t")?;
-    Ok(format!(
-        "opened new tab via keyboard fallback ctrl+t in window {} ({}, locator click failed: {})",
-        edge_window.id, activation_note, reason
-    ))
-}
-
-async fn navigate_via_keyboard(
-    url: &str,
-    timeout_ms: u64,
-    poll_ms: u64,
-    reason: &str,
-) -> Result<String> {
-    let edge_window = window::find_edge_window(None)?;
-    let title_before = edge_window.name.clone();
-    let url_before = crate::edge::wait::current_url().await.ok();
-    let activation_note = crate::edge::actions::context::activate_window_note(&edge_window.id);
-    x11_window::send_key(&edge_window.id, "ctrl+l")?;
-    x11_window::type_text(&edge_window.id, url)?;
-    x11_window::send_key(&edge_window.id, "Return")?;
-    let page_change = wait_for_page_change(
-        Some(&title_before),
-        url_before.as_deref(),
-        Some(url),
-        timeout_ms,
-        poll_ms,
-    )
-    .await?;
-    Ok(format!(
-        "typed via keyboard fallback in window {} ({}, locator typing failed: {}) | pressed Enter on targeted window | {}",
-        edge_window.id, activation_note, reason, page_change
-    ))
 }
 
 #[cfg(test)]
@@ -222,7 +177,7 @@ mod tests {
     fn normalizes_observed_address_bar_urls() {
         assert_eq!(
             normalize_observed_url("127.0.0.1:8124/index.html?run=abc"),
-            "http://127.0.0.1:8124/index.html?run=abc"
+            "127.0.0.1:8124/index.html?run=abc"
         );
     }
 }

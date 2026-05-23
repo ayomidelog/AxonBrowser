@@ -146,7 +146,10 @@ async fn main() -> Result<()> {
             EdgeCommands::Back => println!("{}", edge::actions::click("back").await?),
             EdgeCommands::Forward => println!("{}", edge::actions::click("forward").await?),
             EdgeCommands::Reload => println!("{}", edge::actions::click("reload").await?),
-            EdgeCommands::NewTab => println!("{}", edge::actions::click("new-tab").await?),
+            EdgeCommands::NewTab => {
+                let page = edge::devtools::new_page("about:blank").await?;
+                println!("opened edge new tab {:?} ({})", page.title, page.id);
+            }
             EdgeCommands::Option(inner) => {
                 let summary = edge::options::choose(
                     map_browser_option_prompt(inner.prompt),
@@ -207,301 +210,309 @@ async fn main() -> Result<()> {
                     std::env::set_var("GUIBOT_BROWSER_WINDOW_MODE", "edge");
                 }
                 let edge_page_result: Result<()> = match inner.command {
-                ChromePageCommand::Inspect(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let tree = edge::page::find::inspect(&scope).await?;
-                    print!("{}", render::render_tree(&tree));
-                    Ok(())
-                }
-                ChromePageCommand::Frames(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let matches = edge::page::find::frames(&scope).await?;
-                    print!("{}", render::render_live_matches(&matches));
-                    Ok(())
-                }
-                ChromePageCommand::Find(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let matches = edge::page::find::find(&scope, &inner.selectors).await?;
-                    print!("{}", render::render_live_matches(&matches));
-                    Ok(())
-                }
-                ChromePageCommand::Count(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::find::count(&scope, &inner.selectors).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Read(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.target.scope.frame_selectors)?;
-                    let summary = if inner.value {
-                        edge::page::actions::read_value(
-                            &scope,
-                            &inner.target.selectors,
-                            inner.target.nth,
-                        )
-                        .await?
-                    } else {
-                        edge::page::actions::read_text(
-                            &scope,
-                            &inner.target.selectors,
-                            inner.target.nth,
-                        )
-                        .await?
-                    };
-                    println!("{}", summary);
-                    Ok(())
-                }
-                ChromePageCommand::Focus(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::focus(&scope, &inner.selectors, inner.nth).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Click(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::click(&scope, &inner.selectors, inner.nth).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Hover(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::hover(&scope, &inner.selectors, inner.nth).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::DoubleClick(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::click_kind(
-                            &scope,
-                            &inner.selectors,
-                            inner.nth,
-                            edge::page::actions::PointerClickKind::Double,
-                        )
-                        .await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::RightClick(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::click_kind(
-                            &scope,
-                            &inner.selectors,
-                            inner.nth,
-                            edge::page::actions::PointerClickKind::Secondary,
-                        )
-                        .await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::ClickAndWait(inner) => {
-                    let action_scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let wait_scope =
-                        edge::page::root::PageScope::from_raw(&inner.wait.wait_frame_selectors)?;
-                    let summary = edge::page::flow::click_and_wait(
-                        &action_scope,
-                        &inner.selectors,
-                        &wait_scope,
-                        &inner.wait.wait_selectors,
-                        inner.wait.text.as_deref(),
-                        inner.wait.title_contains.as_deref(),
-                        inner.wait.url_contains.as_deref(),
-                        inner.wait.disappear,
-                        inner.wait.timeout_ms,
-                        inner.wait.poll_ms,
-                    )
-                    .await?;
-                    println!("{}", summary);
-                    Ok(())
-                }
-                ChromePageCommand::Type(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::type_text(&scope, &inner.selectors, &inner.text)
-                            .await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Key(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::press_key(&scope, &inner.selectors, &inner.key)
-                            .await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::PressEnter(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::press_enter(&scope, &inner.selectors).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::SubmitAndWait(inner) => {
-                    let action_scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let wait_scope =
-                        edge::page::root::PageScope::from_raw(&inner.wait.wait_frame_selectors)?;
-                    let summary = edge::page::flow::submit_and_wait(
-                        &action_scope,
-                        &inner.selectors,
-                        &wait_scope,
-                        &inner.wait.wait_selectors,
-                        inner.wait.text.as_deref(),
-                        inner.wait.title_contains.as_deref(),
-                        inner.wait.url_contains.as_deref(),
-                        inner.wait.disappear,
-                        inner.wait.timeout_ms,
-                        inner.wait.poll_ms,
-                    )
-                    .await?;
-                    println!("{}", summary);
-                    Ok(())
-                }
-                ChromePageCommand::Check(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::check(&scope, &inner.selectors).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Uncheck(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::uncheck(&scope, &inner.selectors).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::SelectOption(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::select_option(&scope, &inner.selectors, &inner.option)
-                            .await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Upload(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    println!(
-                        "{}",
-                        edge::page::actions::upload(&scope, &inner.selectors, &inner.path).await?
-                    );
-                    Ok(())
-                }
-                ChromePageCommand::Scroll(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let summary = if inner.into_view {
-                        edge::page::actions::scroll_target_into_view(
-                            &scope,
-                            &inner.selectors,
-                            inner.nth,
-                        )
-                        .await?
-                    } else {
-                        edge::page::actions::scroll_window(
-                            &scope,
-                            map_page_scroll_direction(inner.direction),
-                            inner.amount,
-                        )
-                        .await?
-                    };
-                    println!("{}", summary);
-                    Ok(())
-                }
-                ChromePageCommand::Screenshot(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let summary = match edge::page::screenshot::capture(
-                        &scope,
-                        &inner.output,
-                        &inner.selectors,
-                        inner.nth,
-                    )
-                    .await
-                    {
-                        Ok(summary) => summary,
-                        Err(err) => {
-                            let fallback_summary = edge::screenshot::capture_mode(
-                                &inner.output,
-                                None,
-                                edge::screenshot::ScreenshotMode::Window,
+                    ChromePageCommand::Inspect(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let tree = edge::page::find::inspect(&scope).await?;
+                        print!("{}", render::render_tree(&tree));
+                        Ok(())
+                    }
+                    ChromePageCommand::Frames(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let matches = edge::page::find::frames(&scope).await?;
+                        print!("{}", render::render_live_matches(&matches));
+                        Ok(())
+                    }
+                    ChromePageCommand::Find(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let matches = edge::page::find::find(&scope, &inner.selectors).await?;
+                        print!("{}", render::render_live_matches(&matches));
+                        Ok(())
+                    }
+                    ChromePageCommand::Count(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::find::count(&scope, &inner.selectors).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Read(inner) => {
+                        let scope = edge::page::root::PageScope::from_raw(
+                            &inner.target.scope.frame_selectors,
+                        )?;
+                        let summary = if inner.value {
+                            edge::page::actions::read_value(
+                                &scope,
+                                &inner.target.selectors,
+                                inner.target.nth,
                             )
-                            .await?;
-                            format!(
-                                "edge page screenshot fallback to window capture: {} | reason: {}",
-                                fallback_summary, err
+                            .await?
+                        } else {
+                            edge::page::actions::read_text(
+                                &scope,
+                                &inner.target.selectors,
+                                inner.target.nth,
                             )
-                        }
-                    };
-                    println!("{}", summary);
-                    Ok(())
-                }
-                ChromePageCommand::Wait(inner) => {
-                    let scope =
-                        edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
-                    let summary = if let Some(state) = inner.state {
-                        edge::page::wait::wait_for_state(
+                            .await?
+                        };
+                        println!("{}", summary);
+                        Ok(())
+                    }
+                    ChromePageCommand::Focus(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::focus(&scope, &inner.selectors, inner.nth).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Click(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::click(&scope, &inner.selectors, inner.nth).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Hover(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::hover(&scope, &inner.selectors, inner.nth).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::DoubleClick(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::click_kind(
+                                &scope,
+                                &inner.selectors,
+                                inner.nth,
+                                edge::page::actions::PointerClickKind::Double,
+                            )
+                            .await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::RightClick(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::click_kind(
+                                &scope,
+                                &inner.selectors,
+                                inner.nth,
+                                edge::page::actions::PointerClickKind::Secondary,
+                            )
+                            .await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::ClickAndWait(inner) => {
+                        let action_scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let wait_scope = edge::page::root::PageScope::from_raw(
+                            &inner.wait.wait_frame_selectors,
+                        )?;
+                        let summary = edge::page::flow::click_and_wait(
+                            &action_scope,
+                            &inner.selectors,
+                            &wait_scope,
+                            &inner.wait.wait_selectors,
+                            inner.wait.text.as_deref(),
+                            inner.wait.title_contains.as_deref(),
+                            inner.wait.url_contains.as_deref(),
+                            inner.wait.disappear,
+                            inner.wait.timeout_ms,
+                            inner.wait.poll_ms,
+                        )
+                        .await?;
+                        println!("{}", summary);
+                        Ok(())
+                    }
+                    ChromePageCommand::Type(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::type_text(&scope, &inner.selectors, &inner.text)
+                                .await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Key(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::press_key(&scope, &inner.selectors, &inner.key)
+                                .await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::PressEnter(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::press_enter(&scope, &inner.selectors).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::SubmitAndWait(inner) => {
+                        let action_scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let wait_scope = edge::page::root::PageScope::from_raw(
+                            &inner.wait.wait_frame_selectors,
+                        )?;
+                        let summary = edge::page::flow::submit_and_wait(
+                            &action_scope,
+                            &inner.selectors,
+                            &wait_scope,
+                            &inner.wait.wait_selectors,
+                            inner.wait.text.as_deref(),
+                            inner.wait.title_contains.as_deref(),
+                            inner.wait.url_contains.as_deref(),
+                            inner.wait.disappear,
+                            inner.wait.timeout_ms,
+                            inner.wait.poll_ms,
+                        )
+                        .await?;
+                        println!("{}", summary);
+                        Ok(())
+                    }
+                    ChromePageCommand::Check(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::check(&scope, &inner.selectors).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Uncheck(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::uncheck(&scope, &inner.selectors).await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::SelectOption(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::select_option(
+                                &scope,
+                                &inner.selectors,
+                                &inner.option
+                            )
+                            .await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Upload(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        println!(
+                            "{}",
+                            edge::page::actions::upload(&scope, &inner.selectors, &inner.path)
+                                .await?
+                        );
+                        Ok(())
+                    }
+                    ChromePageCommand::Scroll(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let summary = if inner.into_view {
+                            edge::page::actions::scroll_target_into_view(
+                                &scope,
+                                &inner.selectors,
+                                inner.nth,
+                            )
+                            .await?
+                        } else {
+                            edge::page::actions::scroll_window(
+                                &scope,
+                                map_page_scroll_direction(inner.direction),
+                                inner.amount,
+                            )
+                            .await?
+                        };
+                        println!("{}", summary);
+                        Ok(())
+                    }
+                    ChromePageCommand::Screenshot(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let summary = match edge::page::screenshot::capture(
                             &scope,
+                            &inner.output,
                             &inner.selectors,
                             inner.nth,
-                            map_page_state(state),
-                            inner.timeout_ms,
-                            inner.poll_ms,
                         )
-                        .await?
-                    } else {
-                        edge::page::wait::wait_for_target(
-                            &scope,
-                            &inner.selectors,
-                            inner.text.as_deref(),
-                            inner.title_contains.as_deref(),
-                            inner.url_contains.as_deref(),
-                            inner.disappear,
-                            inner.timeout_ms,
-                            inner.poll_ms,
-                        )
-                        .await?
-                    };
-                    println!("{}", summary);
-                    Ok(())
-                }
-            };
+                        .await
+                        {
+                            Ok(summary) => summary,
+                            Err(err) => {
+                                let fallback_summary = edge::screenshot::capture_mode(
+                                    &inner.output,
+                                    None,
+                                    edge::screenshot::ScreenshotMode::Window,
+                                )
+                                .await?;
+                                format!(
+                                    "edge page screenshot fallback to window capture: {} | reason: {}",
+                                    fallback_summary, err
+                                )
+                            }
+                        };
+                        println!("{}", summary);
+                        Ok(())
+                    }
+                    ChromePageCommand::Wait(inner) => {
+                        let scope =
+                            edge::page::root::PageScope::from_raw(&inner.scope.frame_selectors)?;
+                        let summary = if let Some(state) = inner.state {
+                            edge::page::wait::wait_for_state(
+                                &scope,
+                                &inner.selectors,
+                                inner.nth,
+                                map_page_state(state),
+                                inner.timeout_ms,
+                                inner.poll_ms,
+                            )
+                            .await?
+                        } else {
+                            edge::page::wait::wait_for_target(
+                                &scope,
+                                &inner.selectors,
+                                inner.text.as_deref(),
+                                inner.title_contains.as_deref(),
+                                inner.url_contains.as_deref(),
+                                inner.disappear,
+                                inner.timeout_ms,
+                                inner.poll_ms,
+                            )
+                            .await?
+                        };
+                        println!("{}", summary);
+                        Ok(())
+                    }
+                };
                 unsafe {
                     std::env::remove_var("GUIBOT_BROWSER_WINDOW_MODE");
                 }
@@ -549,12 +560,8 @@ async fn main() -> Result<()> {
                     firefox::screenshot::ScreenshotMode::Window
                 };
                 let summary =
-                    firefox::screenshot::capture_mode(
-                        &inner.output,
-                        inner.query.as_deref(),
-                        mode,
-                    )
-                    .await?;
+                    firefox::screenshot::capture_mode(&inner.output, inner.query.as_deref(), mode)
+                        .await?;
                 println!("{}", summary);
             }
             FirefoxCommands::Resize(inner) => {
@@ -623,6 +630,7 @@ async fn main() -> Result<()> {
             }
             FirefoxCommands::Goto(inner) => {
                 let summary = firefox::goto::navigate(
+                    firefox_flavor,
                     &inner.url,
                     inner.new_tab,
                     inner.timeout_ms,
@@ -634,7 +642,11 @@ async fn main() -> Result<()> {
             FirefoxCommands::Back => println!("{}", firefox::actions::click("back").await?),
             FirefoxCommands::Forward => println!("{}", firefox::actions::click("forward").await?),
             FirefoxCommands::Reload => println!("{}", firefox::actions::click("reload").await?),
-            FirefoxCommands::NewTab => println!("{}", firefox::actions::click("new-tab").await?),
+            FirefoxCommands::NewTab => {
+                let summary =
+                    firefox::goto::open_new_tab(firefox_flavor, 5_000, 200).await?;
+                println!("{}", summary);
+            }
             FirefoxCommands::Option(inner) => {
                 let summary = firefox::options::choose(
                     map_browser_option_prompt(inner.prompt),

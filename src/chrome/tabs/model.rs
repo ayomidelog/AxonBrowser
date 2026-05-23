@@ -28,7 +28,13 @@ pub async fn resolve_tabs_with_current() -> Result<Vec<TabInfo>> {
 fn build_tab_infos(tabs: &[devtools::PageInfo], current_id: Option<&str>) -> Vec<TabInfo> {
     let remembered_id = session::read_browser_tab_target();
     let mut ordered = tabs.to_vec();
-    ordered.sort_by(|left, right| sort_key(left, current_id, remembered_id.as_deref()).cmp(&sort_key(right, current_id, remembered_id.as_deref())));
+    ordered.sort_by(|left, right| {
+        sort_key(left, current_id, remembered_id.as_deref()).cmp(&sort_key(
+            right,
+            current_id,
+            remembered_id.as_deref(),
+        ))
+    });
 
     ordered
         .iter()

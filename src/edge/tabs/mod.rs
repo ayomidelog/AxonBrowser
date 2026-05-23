@@ -1,6 +1,7 @@
 pub mod close;
 pub mod list;
 pub mod model;
+pub mod recovery;
 pub mod switch;
 
 pub use close::close;

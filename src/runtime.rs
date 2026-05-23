@@ -78,7 +78,10 @@ fn start_session() -> Result<HeadlessSession> {
         env.extend(dbus_env);
 
         env.insert(HEADLESS_MODE_ENV.to_string(), "1".to_string());
-        env.insert(HEADLESS_SESSION_DIR_ENV.to_string(), dir.display().to_string());
+        env.insert(
+            HEADLESS_SESSION_DIR_ENV.to_string(),
+            dir.display().to_string(),
+        );
         env.insert(
             VNC_SESSION_ENV_ENV.to_string(),
             dir.join(SESSION_ENV_NAME).display().to_string(),
@@ -136,10 +139,7 @@ fn ensure_commands<const N: usize>(commands: [&str; N]) -> Result<()> {
         return Ok(());
     }
 
-    bail!(
-        "missing headless runtime commands: {}",
-        missing.join(", ")
-    )
+    bail!("missing headless runtime commands: {}", missing.join(", "))
 }
 
 fn command_exists(command: &str) -> bool {

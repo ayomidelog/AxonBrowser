@@ -15,6 +15,9 @@ if "$VENV_DIR/bin/python" -m camoufox path >/dev/null 2>&1; then
 set -euo pipefail
 VENV_DIR="${GUIBOT_CAMOUFOX_VENV:-$HOME/.local/share/axonbrowser/camoufox-venv}"
 BIN="$("$VENV_DIR/bin/python" -m camoufox path)"
+if [[ -d "$BIN" ]]; then
+  BIN="$BIN/camoufox"
+fi
 exec "$BIN" "$@"
 EOF
   chmod +x "$BIN_DIR/camoufox"

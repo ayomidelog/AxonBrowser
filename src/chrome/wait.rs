@@ -3,9 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow};
 use tokio::time::sleep;
 
-use crate::{
-    chrome::{devtools, locators, retry},
-};
+use crate::chrome::{devtools, locators, retry};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_POLL_MS: u64 = 200;
@@ -141,7 +139,9 @@ pub async fn current_title() -> Result<String> {
             }
         }
 
-        Err(anyhow!("could not read chrome title from DevTools page list"))
+        Err(anyhow!(
+            "could not read chrome title from DevTools page list"
+        ))
     })
     .await
 }

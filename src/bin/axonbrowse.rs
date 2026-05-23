@@ -1,5 +1,5 @@
 use std::env;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 
 const HELP: &str = r#"axonbrowse — browser automation wrapper
 
@@ -34,7 +34,12 @@ Commands:
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
-    if args.is_empty() || matches!(args.first().map(String::as_str), Some("-h" | "--help" | "help")) {
+    if args.is_empty()
+        || matches!(
+            args.first().map(String::as_str),
+            Some("-h" | "--help" | "help")
+        )
+    {
         print!("{}", HELP);
         return;
     }

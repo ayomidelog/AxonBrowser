@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod attach;
+pub mod bidi;
 pub mod current;
 pub mod goto;
 pub mod launch;
@@ -9,6 +10,5 @@ pub mod resize;
 pub mod screenshot;
 pub mod session;
 pub mod tabs;
-pub mod url;
 pub mod wait;
 pub mod window;

@@ -33,7 +33,10 @@ pub async fn capture_mode(
 
         fs::write(output, bytes)
             .with_context(|| format!("failed to write screenshot {}", output.display()))?;
-        return Ok(format!("saved {} from Chrome DevTools page target", output.display()));
+        return Ok(format!(
+            "saved {} from Chrome DevTools page target",
+            output.display()
+        ));
     }
 
     let browser_window = match mode {

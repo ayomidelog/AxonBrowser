@@ -402,23 +402,21 @@ fn parse_xwininfo_line(line: &str) -> Option<WindowMatch> {
         return None;
     }
 
-    let geometry = rest
-        .split_whitespace()
-        .find(|token| {
-            let bytes = token.as_bytes();
-            bytes
-                .iter()
-                .position(|byte| *byte == b'x')
-                .is_some_and(|x_index| {
-                    x_index > 0
-                        && bytes
-                            .iter()
-                            .skip(x_index + 1)
-                            .filter(|byte| **byte == b'+')
-                            .count()
-                            >= 2
-                })
-        })?;
+    let geometry = rest.split_whitespace().find(|token| {
+        let bytes = token.as_bytes();
+        bytes
+            .iter()
+            .position(|byte| *byte == b'x')
+            .is_some_and(|x_index| {
+                x_index > 0
+                    && bytes
+                        .iter()
+                        .skip(x_index + 1)
+                        .filter(|byte| **byte == b'+')
+                        .count()
+                        >= 2
+            })
+    })?;
     let (width, rest) = geometry.split_once('x')?;
     let (height, pos) = rest.split_once('+')?;
     let (x, y) = pos.split_once('+')?;

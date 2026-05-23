@@ -1,11 +1,12 @@
 use anyhow::Result;
 
-use crate::{edge::actions, window};
+use crate::edge::devtools;
 
-use super::{model::resolve_tabs_with_current, switch};
+use super::{model::resolve_tabs_with_current, recovery};
 
 pub async fn close(index: Option<usize>) -> Result<String> {
     let tabs = resolve_tabs_with_current().await?;
+    let previous_count = tabs.len();
     let target_index = index.unwrap_or_else(|| {
         tabs.iter()
             .find(|tab| tab.is_current)
@@ -13,11 +14,8 @@ pub async fn close(index: Option<usize>) -> Result<String> {
             .unwrap_or(0)
     });
 
-    let preface = match tabs.iter().find(|tab| tab.index == target_index) {
-        Some(tab) if tab.is_current => {
-            format!("closing current edge tab {} ({:?})", tab.index, tab.title)
-        }
-        Some(tab) => switch::switch(switch::TabSwitchTarget::Index(tab.index)).await?,
+    let target = match tabs.iter().find(|tab| tab.index == target_index) {
+        Some(tab) => tab,
         None => {
             return Err(anyhow::anyhow!(
                 "edge tab index {} is out of range",
@@ -26,11 +24,23 @@ pub async fn close(index: Option<usize>) -> Result<String> {
         }
     };
 
-    let focus_summary = actions::focus("window").await?;
-    window::send_key_active("ctrl+w")?;
+    let fallback = if target.is_current {
+        tabs.iter()
+            .find(|tab| tab.index != target.index)
+            .map(|tab| tab.id.clone())
+    } else {
+        None
+    };
+
+    devtools::close_page(&target.id).await?;
+    if let Some(fallback_id) = fallback {
+        let _ = devtools::activate_page(&fallback_id).await;
+    }
+    let recovery_summary =
+        recovery::wait_for_close_recovery(&target.id, previous_count, 4_000, 150).await?;
 
     Ok(format!(
-        "{} | {} | sent ctrl+w to active edge window for tab {}",
-        preface, focus_summary, target_index
+        "closed edge tab {} ({:?}) | {}",
+        target_index, target.title, recovery_summary
     ))
 }

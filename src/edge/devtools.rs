@@ -98,7 +98,7 @@ pub async fn navigate(
     url_hint: Option<&str>,
 ) -> Result<PageInfo> {
     let page = current_page_with_hint(title_hint, url_hint)?
-        .ok_or_else(|| anyhow!("no Chrome page target exposed by DevTools"))?;
+        .ok_or_else(|| anyhow!("no Edge page target exposed by DevTools"))?;
     send_page_command(
         &page.web_socket_debugger_url,
         "Page.navigate",
@@ -138,8 +138,7 @@ pub async fn close_page(target_id: &str) -> Result<()> {
 }
 
 pub async fn capture_screenshot() -> Result<Vec<u8>> {
-    let page =
-        current_page()?.ok_or_else(|| anyhow!("no Chrome page target exposed by DevTools"))?;
+    let page = current_page()?.ok_or_else(|| anyhow!("no Edge page target exposed by DevTools"))?;
     let value = send_page_command(
         &page.web_socket_debugger_url,
         "Page.captureScreenshot",
@@ -152,7 +151,7 @@ pub async fn capture_screenshot() -> Result<Vec<u8>> {
         .ok_or_else(|| anyhow!("Page.captureScreenshot did not return data"))?;
     BASE64
         .decode(encoded)
-        .context("failed to decode Chrome DevTools screenshot payload")
+        .context("failed to decode Edge DevTools screenshot payload")
 }
 
 fn devtools_port() -> Result<Option<u16>> {
@@ -217,7 +216,7 @@ fn list_pages(port: u16) -> Result<Vec<PageInfo>> {
     let parsed: Value = serde_json::from_str(&body).context("failed to parse /json/list JSON")?;
     let items = parsed
         .as_array()
-        .ok_or_else(|| anyhow!("Chrome DevTools /json/list returned non-array JSON"))?;
+        .ok_or_else(|| anyhow!("Edge DevTools /json/list returned non-array JSON"))?;
 
     let mut pages = Vec::new();
     for item in items {
@@ -227,148 +226,95 @@ fn list_pages(port: u16) -> Result<Vec<PageInfo>> {
         let Some(id) = item.get("id").and_then(Value::as_str) else {
             continue;
         };
-        let Some(title) = item.get("title").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(url) = item.get("url").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(ws) = item.get("webSocketDebuggerUrl").and_then(Value::as_str) else {
+        let Some(web_socket_debugger_url) =
+            item.get("webSocketDebuggerUrl").and_then(Value::as_str)
+        else {
             continue;
         };
         pages.push(PageInfo {
             id: id.to_string(),
-            title: title.to_string(),
-            url: url.to_string(),
-            web_socket_debugger_url: ws.to_string(),
+            title: item
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            url: item
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            web_socket_debugger_url: web_socket_debugger_url.to_string(),
         });
     }
     Ok(pages)
 }
 
 fn http_get_json(port: u16, path: &str) -> Result<String> {
-    let addr = ("127.0.0.1", port)
-        .to_socket_addrs()
-        .context("failed to resolve Chrome DevTools address")?
-        .next()
-        .ok_or_else(|| anyhow!("no Chrome DevTools address resolved"))?;
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
-        .context("failed to connect to Chrome DevTools HTTP endpoint")?;
+    let mut stream = TcpStream::connect(
+        ("127.0.0.1", port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| anyhow!("failed to resolve Edge DevTools address"))?,
+    )
+    .with_context(|| format!("failed connecting to Edge DevTools on port {}", port))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
-        .context("failed to set Chrome DevTools read timeout")?;
+        .context("failed to set Edge DevTools read timeout")?;
     stream
         .set_write_timeout(Some(Duration::from_secs(2)))
-        .context("failed to set Chrome DevTools write timeout")?;
+        .context("failed to set Edge DevTools write timeout")?;
+
     write!(
         stream,
         "GET {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
         path, port
     )
-    .context("failed to write Chrome DevTools HTTP request")?;
-    let mut response = Vec::new();
-    let mut chunk = [0u8; 8192];
+    .context("failed to write Edge DevTools HTTP request")?;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut bytes = Vec::new();
+    let mut buf = [0u8; 8192];
     loop {
-        match stream.read(&mut chunk) {
+        match stream.read(&mut buf) {
             Ok(0) => break,
-            Ok(n) => response.extend_from_slice(&chunk[..n]),
+            Ok(read) => bytes.extend_from_slice(&buf[..read]),
             Err(err)
-                if matches!(
-                    err.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    || err.kind() == std::io::ErrorKind::TimedOut =>
             {
-                if response.is_empty() {
-                    return Err(err).context("failed to read Chrome DevTools HTTP response");
+                if !bytes.is_empty() || std::time::Instant::now() >= deadline {
+                    break;
                 }
-                break;
             }
-            Err(err) => return Err(err).context("failed to read Chrome DevTools HTTP response"),
+            Err(err) => return Err(err).context("failed to read Edge DevTools HTTP response"),
         }
     }
     let response =
-        String::from_utf8(response).context("Chrome DevTools HTTP response was not valid UTF-8")?;
+        String::from_utf8(bytes).context("failed to decode Edge DevTools HTTP response bytes")?;
     let (_, body) = response
         .split_once("\r\n\r\n")
-        .ok_or_else(|| anyhow!("malformed Chrome DevTools HTTP response"))?;
+        .ok_or_else(|| anyhow!("malformed Edge DevTools HTTP response"))?;
     Ok(body.to_string())
+}
+
+async fn wait_for_page_by_id(target_id: &str, timeout: Duration) -> Result<PageInfo> {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if let Some(page) = current_page_by_id(target_id)? {
+            return Ok(page);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(anyhow!(
+        "timed out waiting for Edge DevTools target {}",
+        target_id
+    ))
 }
 
 fn current_page_by_id(target_id: &str) -> Result<Option<PageInfo>> {
     Ok(list_pages_for_session()?
         .into_iter()
         .find(|page| page.id == target_id))
-}
-
-async fn wait_for_page_by_id(target_id: &str, timeout: Duration) -> Result<PageInfo> {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        if let Some(page) = current_page_by_id(target_id)? {
-            return Ok(page);
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    Err(anyhow!(
-        "timed out waiting for Chrome DevTools target {} to appear",
-        target_id
-    ))
-}
-
-async fn send_browser_command(method: &str, params: Value) -> Result<Value> {
-    let ws = browser_websocket_url()?
-        .ok_or_else(|| anyhow!("no Chrome browser DevTools websocket exposed"))?;
-    send_command(&ws, method, params).await
-}
-
-async fn send_page_command(page_ws: &str, method: &str, params: Value) -> Result<Value> {
-    send_command(page_ws, method, params).await
-}
-
-async fn send_command(websocket_url: &str, method: &str, params: Value) -> Result<Value> {
-    let (mut socket, _) = connect_async(websocket_url).await.with_context(|| {
-        format!(
-            "failed to connect to Chrome DevTools websocket {}",
-            websocket_url
-        )
-    })?;
-
-    socket
-        .send(Message::Text(
-            json!({
-                "id": 1,
-                "method": method,
-                "params": params
-            })
-            .to_string()
-            .into(),
-        ))
-        .await
-        .with_context(|| format!("failed to send Chrome DevTools {}", method))?;
-
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    while std::time::Instant::now() < deadline {
-        let Some(message) = socket.next().await else {
-            break;
-        };
-        let message = message.context("failed reading Chrome DevTools websocket response")?;
-        let Message::Text(text) = message else {
-            continue;
-        };
-        let parsed: Value =
-            serde_json::from_str(&text).context("failed to parse Chrome DevTools JSON")?;
-        if parsed.get("id").and_then(Value::as_i64) == Some(1) {
-            if let Some(error) = parsed.get("error") {
-                bail!("Chrome DevTools {} failed: {}", method, error);
-            }
-            return Ok(parsed
-                .get("result")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(Default::default())));
-        }
-    }
-
-    bail!("timed out waiting for Chrome DevTools {} response", method)
 }
 
 fn remember_page_target(page: &PageInfo) -> Result<()> {
@@ -380,11 +326,83 @@ fn remember_page_target(page: &PageInfo) -> Result<()> {
 fn canonical_url(raw: &str) -> String {
     let trimmed = raw.trim();
     let lower = trimmed.to_ascii_lowercase();
-    if let Some(rest) = lower.strip_prefix("http://") {
+    if lower.starts_with("about:")
+        || lower.starts_with("edge:")
+        || lower.starts_with("file:")
+        || lower.starts_with("data:")
+    {
+        lower
+    } else if let Some(rest) = lower.strip_prefix("http://") {
         rest.to_string()
     } else if let Some(rest) = lower.strip_prefix("https://") {
         rest.to_string()
     } else {
         lower
     }
+}
+
+async fn send_browser_command(method: &str, params: Value) -> Result<Value> {
+    let browser_ws = browser_websocket_url()?
+        .ok_or_else(|| anyhow!("Edge DevTools browser websocket is unavailable"))?;
+    send_command(&browser_ws, method, params).await
+}
+
+async fn send_page_command(page_ws: &str, method: &str, params: Value) -> Result<Value> {
+    send_command(page_ws, method, params).await
+}
+
+async fn send_command(websocket_url: &str, method: &str, params: Value) -> Result<Value> {
+    let (mut stream, _) = connect_async(websocket_url).await.with_context(|| {
+        format!(
+            "failed connecting to Edge DevTools websocket {}",
+            websocket_url
+        )
+    })?;
+    let id = 1u64;
+    let payload = json!({
+        "id": id,
+        "method": method,
+        "params": params,
+    });
+    stream
+        .send(Message::Text(payload.to_string().into()))
+        .await
+        .with_context(|| format!("failed sending Edge DevTools command {}", method))?;
+
+    while let Some(message) = stream.next().await {
+        let message = message.context("failed reading Edge DevTools websocket message")?;
+        match message {
+            Message::Text(text) => {
+                let value: Value = serde_json::from_str(&text)
+                    .with_context(|| format!("failed parsing Edge DevTools message {}", text))?;
+                if value.get("id").and_then(Value::as_u64) != Some(id) {
+                    continue;
+                }
+                if let Some(error) = value.get("error") {
+                    bail!("Edge DevTools {} failed: {}", method, error);
+                }
+                return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+            }
+            Message::Binary(bytes) => {
+                let text = String::from_utf8(bytes.to_vec())
+                    .context("failed decoding Edge DevTools binary message")?;
+                let value: Value = serde_json::from_str(&text)
+                    .with_context(|| format!("failed parsing Edge DevTools message {}", text))?;
+                if value.get("id").and_then(Value::as_u64) != Some(id) {
+                    continue;
+                }
+                if let Some(error) = value.get("error") {
+                    bail!("Edge DevTools {} failed: {}", method, error);
+                }
+                return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+
+    Err(anyhow!(
+        "Edge DevTools websocket closed before {} returned",
+        method
+    ))
 }

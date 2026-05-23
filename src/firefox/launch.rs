@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
+    net::TcpListener,
     path::PathBuf,
     process::{Command, Stdio},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -10,7 +11,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use tokio::time::sleep;
 
-use super::{session, window};
+use super::{bidi, session, window};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserFlavor {
@@ -53,23 +54,7 @@ pub struct FirefoxLaunchState {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-}
-
-#[allow(dead_code)]
-pub async fn launch(
-    initial_url: Option<&str>,
-    profile_override: Option<&str>,
-    timeout_ms: u64,
-    poll_ms: u64,
-) -> Result<String> {
-    launch_with_flavor(
-        BrowserFlavor::Firefox,
-        initial_url,
-        profile_override,
-        timeout_ms,
-        poll_ms,
-    )
-    .await
+    pub bidi_port: u16,
 }
 
 pub async fn launch_with_flavor(
@@ -79,19 +64,15 @@ pub async fn launch_with_flavor(
     timeout_ms: u64,
     poll_ms: u64,
 ) -> Result<String> {
-    let state = launch_and_wait_with_flavor(
-        flavor,
-        initial_url,
-        profile_override,
-        timeout_ms,
-        poll_ms,
-    )
-    .await?;
+    let state =
+        launch_and_wait_with_flavor(flavor, initial_url, profile_override, timeout_ms, poll_ms)
+            .await?;
     Ok(format!(
         concat!(
             "launched {} pid {} with profile {}\n",
             "window: {} ({}, {}x{} at {},{})\n",
             "url: {}\n",
+            "bidi: ws://127.0.0.1:{}/session\n",
             "log: {}",
         ),
         flavor.label(),
@@ -104,25 +85,9 @@ pub async fn launch_with_flavor(
         state.x,
         state.y,
         state.url,
+        state.bidi_port,
         state.log_path,
     ))
-}
-
-#[allow(dead_code)]
-pub async fn launch_and_wait(
-    initial_url: Option<&str>,
-    profile_override: Option<&str>,
-    timeout_ms: u64,
-    poll_ms: u64,
-) -> Result<FirefoxLaunchState> {
-    launch_and_wait_with_flavor(
-        BrowserFlavor::Firefox,
-        initial_url,
-        profile_override,
-        timeout_ms,
-        poll_ms,
-    )
-    .await
 }
 
 pub async fn launch_and_wait_with_flavor(
@@ -133,25 +98,38 @@ pub async fn launch_and_wait_with_flavor(
     poll_ms: u64,
 ) -> Result<FirefoxLaunchState> {
     let url = normalize_launch_url(initial_url.unwrap_or("about:blank"))?;
+    let profile_dir = prepare_profile_dir(flavor, profile_override)?;
+    let browser_binary = find_browser_binary(flavor)?;
+    cleanup_existing_profile_processes(&profile_dir)?;
+    let bidi_port = allocate_bidi_port()?;
     let baseline: HashSet<String> = window::list_firefox_windows(None)
         .unwrap_or_default()
         .into_iter()
         .map(|window| window.id)
         .collect();
 
-    let profile_dir = prepare_profile_dir(flavor, profile_override)?;
     let log_path = unique_path(flavor.launch_log_prefix(), "log");
-    let browser_binary = find_browser_binary(flavor)?;
-    let pid = spawn_browser(flavor, &browser_binary, &profile_dir, &log_path, &url)?;
+    let pid = spawn_browser(
+        flavor,
+        &browser_binary,
+        &profile_dir,
+        &log_path,
+        &url,
+        bidi_port,
+    )?;
 
     let start = Instant::now();
-    let timeout = Duration::from_millis(timeout_ms.max(15000));
+    let timeout = Duration::from_millis(timeout_ms.max(15_000));
     let interval = Duration::from_millis(poll_ms.max(1));
 
     loop {
         if let Some(window_match) = detect_new_window(&baseline)? {
-            session::remember_target(&window_match.id)?;
             let _ = crate::window::activate_window(&window_match.id);
+            let _ = session::remember_browser_window_target(&window_match.id);
+            let _ = session::remember_browser_url(&url);
+            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+            let _ = session::remember_browser_port(bidi_port);
+            let _ = remember_initial_context(&url).await;
             return Ok(FirefoxLaunchState {
                 pid,
                 profile: profile_dir.display().to_string(),
@@ -163,6 +141,7 @@ pub async fn launch_and_wait_with_flavor(
                 y: window_match.y,
                 width: window_match.width,
                 height: window_match.height,
+                bidi_port,
             });
         }
 
@@ -194,6 +173,7 @@ fn spawn_browser(
     profile_dir: &PathBuf,
     log_path: &PathBuf,
     url: &str,
+    bidi_port: u16,
 ) -> Result<u32> {
     let stdout = File::create(log_path).with_context(|| {
         format!(
@@ -218,8 +198,10 @@ fn spawn_browser(
             std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string()),
         )
         .arg("--new-window")
+        .arg("--new-instance")
         .arg("--profile")
         .arg(profile_dir)
+        .arg(format!("--remote-debugging-port={bidi_port}"))
         .arg(url)
         .args(extra_browser_args(flavor))
         .stdout(Stdio::from(stdout))
@@ -227,17 +209,21 @@ fn spawn_browser(
         .spawn()
         .with_context(|| format!("failed to detach {browser_binary}"))?;
 
-    find_browser_pid(flavor, profile_dir, url)
+    find_browser_pid(profile_dir, url, bidi_port)
 }
 
-fn find_browser_pid(flavor: BrowserFlavor, profile_dir: &PathBuf, url: &str) -> Result<u32> {
+fn find_browser_pid(profile_dir: &PathBuf, url: &str, bidi_port: u16) -> Result<u32> {
     let profile_text = profile_dir.display().to_string();
+    let port_flag = format!("--remote-debugging-port={bidi_port}");
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_secs(3) {
-        let output = Command::new("pgrep").args(["-af", flavor.label()]).output()?;
+        let output = Command::new("ps").args(["-eo", "pid=,args="]).output()?;
         if output.status.success() {
             for line in String::from_utf8_lossy(&output.stdout).lines() {
-                if !line.contains(&profile_text) || !line.contains(url) {
+                if !line.contains(&profile_text)
+                    || !line.contains(&port_flag)
+                    || !line.contains(url)
+                {
                     continue;
                 }
                 if let Some((pid_text, _)) = line.trim().split_once(' ')
@@ -251,57 +237,103 @@ fn find_browser_pid(flavor: BrowserFlavor, profile_dir: &PathBuf, url: &str) -> 
     }
 
     Err(anyhow!(
-        "failed to resolve launched {} pid for profile {}",
-        flavor.label(),
-        profile_text
+        "failed to resolve launched browser pid for profile {} on {}",
+        profile_text,
+        port_flag
     ))
 }
 
-fn find_browser_binary(flavor: BrowserFlavor) -> Result<String> {
-    let env_override = match flavor {
-        BrowserFlavor::Firefox => std::env::var("GUIBOT_FIREFOX_BIN").ok(),
-        BrowserFlavor::Camoufox => std::env::var("GUIBOT_CAMOUFOX_BIN").ok(),
-    };
-    if let Some(path) = env_override {
-        if !path.trim().is_empty() {
-            return Ok(path);
+fn cleanup_existing_profile_processes(profile_dir: &PathBuf) -> Result<()> {
+    let profile_text = profile_dir.display().to_string();
+    session::clear_browser_session_state();
+    let output = Command::new("ps")
+        .args(["-eo", "pid=,args="])
+        .output()
+        .context("failed to inspect existing firefox processes")?;
+    if output.status.success() {
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            if !line.contains(&profile_text) || !line.contains("--remote-debugging-port=") {
+                continue;
+            }
+            let Some((pid_text, _)) = line.trim().split_once(' ') else {
+                continue;
+            };
+            let Ok(pid) = pid_text.parse::<u32>() else {
+                continue;
+            };
+            let _ = terminate_pid(pid);
         }
     }
 
+    Ok(())
+}
+
+fn terminate_pid(pid: u32) -> Result<()> {
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(2) {
+        let alive = Command::new("sh")
+            .args(["-lc", &format!("kill -0 {pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !alive {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let _ = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    Ok(())
+}
+
+fn find_browser_binary(flavor: BrowserFlavor) -> Result<String> {
     let candidates = match flavor {
         BrowserFlavor::Firefox => vec![
-            "firefox".to_string(),
-            "firefox-esr".to_string(),
-            "/usr/bin/firefox".to_string(),
-            "/usr/bin/firefox-esr".to_string(),
+            "firefox",
+            "firefox-esr",
+            "/usr/bin/firefox",
+            "/usr/bin/firefox-esr",
         ],
-        BrowserFlavor::Camoufox => {
-            let mut candidates = vec![
-                "camoufox".to_string(),
-                format!(
-                    "{}/.cache/camoufox/camoufox",
-                    std::env::var("HOME").unwrap_or_default()
-                ),
-                format!(
-                    "{}/.cache/camoufox/camoufox-bin",
-                    std::env::var("HOME").unwrap_or_default()
-                ),
-            ];
-            if let Some(path) = resolve_camoufox_python_binary()? {
-                candidates.insert(0, path);
-            }
-            candidates
-        }
+        BrowserFlavor::Camoufox => vec![
+            "camoufox",
+            "/home/ayovps/.local/bin/camoufox",
+            "/home/ayovps/.cache/camoufox/camoufox",
+        ],
     };
 
     for candidate in candidates {
-        if std::path::Path::new(&candidate).exists() {
-            return Ok(candidate);
-        }
         let output = Command::new("sh")
             .args(["-lc", &format!("command -v {}", candidate)])
             .output()
-            .with_context(|| format!("failed checking {} binary {candidate}", flavor.label()))?;
+            .with_context(|| format!("failed checking browser binary {candidate}"))?;
+        if output.status.success() {
+            let resolved = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !resolved.is_empty() {
+                return Ok(resolved);
+            }
+        }
+    }
+
+    if matches!(flavor, BrowserFlavor::Camoufox) {
+        let output = Command::new("sh")
+            .args([
+                "-lc",
+                "python3 -m camoufox path 2>/dev/null || /home/ayovps/.local/share/axonbrowser/camoufox-venv/bin/python -m camoufox path 2>/dev/null",
+            ])
+            .output()
+            .context("failed checking camoufox path helper")?;
         if output.status.success() {
             let resolved = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !resolved.is_empty() {
@@ -311,29 +343,9 @@ fn find_browser_binary(flavor: BrowserFlavor) -> Result<String> {
     }
 
     Err(anyhow!(
-        "could not find a {} binary; set GUIBOT_{}_BIN to override",
-        flavor.label(),
-        flavor.label().to_ascii_uppercase()
+        "could not find a {} binary in PATH",
+        flavor.label()
     ))
-}
-
-fn resolve_camoufox_python_binary() -> Result<Option<String>> {
-    for python in ["python3", "python"] {
-        let output = Command::new(python)
-            .args(["-m", "camoufox", "path"])
-            .output();
-        let Ok(output) = output else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let resolved = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !resolved.is_empty() {
-            return Ok(Some(resolved));
-        }
-    }
-    Ok(None)
 }
 
 fn prepare_profile_dir(flavor: BrowserFlavor, profile_override: Option<&str>) -> Result<PathBuf> {
@@ -342,30 +354,7 @@ fn prepare_profile_dir(flavor: BrowserFlavor, profile_override: Option<&str>) ->
         .unwrap_or_else(|| unique_path(flavor.user_profile_prefix(), "dir"));
     fs::create_dir_all(&path)
         .with_context(|| format!("failed to create firefox profile dir {}", path.display()))?;
-    let prefs = path.join("user.js");
-    fs::write(
-        &prefs,
-        [
-            "user_pref(\"accessibility.force_disabled\", 0);",
-            "user_pref(\"browser.shell.checkDefaultBrowser\", false);",
-            "user_pref(\"browser.aboutwelcome.enabled\", false);",
-            "user_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");",
-            "user_pref(\"startup.homepage_welcome_url\", \"\");",
-            "user_pref(\"startup.homepage_welcome_url.additional\", \"\");",
-            "user_pref(\"trailhead.firstrun.didSeeAboutWelcome\", true);",
-            "user_pref(\"signon.rememberSignons\", true);",
-        ]
-        .join("\n"),
-    )
-    .with_context(|| format!("failed to write firefox profile prefs {}", prefs.display()))?;
     Ok(path)
-}
-
-fn extra_browser_args(flavor: BrowserFlavor) -> &'static [&'static str] {
-    match flavor {
-        BrowserFlavor::Firefox => &[],
-        BrowserFlavor::Camoufox => &["--no-remote"],
-    }
 }
 
 fn unique_path(prefix: &str, suffix: &str) -> PathBuf {
@@ -387,10 +376,44 @@ fn normalize_launch_url(raw: &str) -> Result<String> {
     if trimmed.contains("://")
         || trimmed.starts_with("about:")
         || trimmed.starts_with("firefox:")
+        || trimmed.starts_with("moz-extension:")
         || trimmed.starts_with("file:")
         || trimmed.starts_with("data:")
     {
         return Ok(trimmed.to_string());
     }
     Ok(format!("https://{}", trimmed))
+}
+
+fn extra_browser_args(flavor: BrowserFlavor) -> Vec<&'static str> {
+    match flavor {
+        BrowserFlavor::Firefox => vec!["--browser"],
+        BrowserFlavor::Camoufox => vec!["--browser"],
+    }
+}
+
+fn allocate_bidi_port() -> Result<u16> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .context("failed to allocate a local Firefox BiDi port")?;
+    let port = listener
+        .local_addr()
+        .context("failed reading allocated Firefox BiDi port")?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+async fn remember_initial_context(url: &str) -> Result<()> {
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(5) {
+        if let Ok(Some(current_url)) = bidi::current_url().await
+            && !current_url.trim().is_empty()
+        {
+            let _ = session::remember_browser_url(&current_url);
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    let _ = session::remember_browser_url(url);
+    Ok(())
 }

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow};
 use tokio::time::sleep;
 
-use crate::chrome::window as chrome_window;
+use crate::edge::window as edge_window;
 
 use super::model::{TabInfo, resolve_tabs_with_current};
 
@@ -41,7 +41,7 @@ pub async fn wait_for_current_tab(
     };
 
     Err(anyhow!(
-        "timed out after {}ms waiting for chrome tab {} to become current: {}",
+        "timed out after {}ms waiting for edge tab {} to become current: {}",
         timeout_ms,
         target_id,
         last_state
@@ -63,30 +63,11 @@ pub async fn wait_for_close_recovery(
         attempts += 1;
         match resolve_tabs_with_current().await {
             Ok(tabs) => {
-                if tabs.iter().all(|tab| tab.id != closed_target_id) {
-                    return Ok(format!(
-                        "chrome tabs recovered after close; {} tabs visible after {}ms ({} attempts)",
-                        tabs.len(),
-                        start.elapsed().as_millis(),
-                        attempts
-                    ));
-                }
-
-                if tabs.len() != previous_count {
-                    return Ok(format!(
-                        "chrome tabs recovered after close; {} tabs visible after {}ms ({} attempts)",
-                        tabs.len(),
-                        start.elapsed().as_millis(),
-                        attempts
-                    ));
-                }
-
-                if tabs.len() == 1
-                    && tabs[0].title != "Guibot Page Demo"
-                    && tabs[0].title != "Example Domain"
+                if tabs.iter().all(|tab| tab.id != closed_target_id) || tabs.len() != previous_count
                 {
                     return Ok(format!(
-                        "chrome tab recovered after close by replacing content after {}ms ({} attempts)",
+                        "edge tabs recovered after close; {} tabs visible after {}ms ({} attempts)",
+                        tabs.len(),
                         start.elapsed().as_millis(),
                         attempts
                     ));
@@ -101,9 +82,9 @@ pub async fn wait_for_close_recovery(
                 }
             }
             Err(err) => {
-                if chrome_window::find_browser_window(None).is_err() {
+                if edge_window::find_edge_window(None).is_err() {
                     return Ok(format!(
-                        "chrome window closed after tab close after {}ms ({} attempts)",
+                        "edge window closed after tab close after {}ms ({} attempts)",
                         start.elapsed().as_millis(),
                         attempts
                     ));
@@ -119,7 +100,7 @@ pub async fn wait_for_close_recovery(
     };
 
     Err(anyhow!(
-        "timed out after {}ms waiting for chrome tabs to recover after close: {}",
+        "timed out after {}ms waiting for edge tabs to recover after close: {}",
         timeout_ms,
         last_state
     ))
