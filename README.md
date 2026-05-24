@@ -1,12 +1,12 @@
-# axonbrowser
+# AxonBrowser
 
 Browser automation for Chrome, Edge, Firefox, and Camoufox on Linux.
 
 Axonbrowser now runs in two layers:
-- browser shell control:
+- Browser shell control:
   - Chrome and Edge use native Chromium DevTools
   - Firefox and Camoufox use Firefox WebDriver BiDi
-- rendered page interaction:
+- Rendered page interaction:
   - real accessibility/X11 actions through AT-SPI
 
 That means shell commands like `launch`, `current`, `goto`, `tabs`, `scroll`,
