@@ -1,5 +1,9 @@
 # AxonBrowser
 
+[![CI](https://github.com/ayomidelog/AxonBrowser/actions/workflows/ci.yml/badge.svg)](https://github.com/ayomidelog/AxonBrowser/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ayomidelog/AxonBrowser)](https://github.com/ayomidelog/AxonBrowser/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Browser automation for Chrome, Edge, Firefox, and Camoufox on Linux.
 
 Axonbrowser now runs in two layers:
@@ -42,10 +46,13 @@ Local source builds require a Rust toolchain.
 ## Install
 
 ```bash
+# Install the latest version
+curl -fsSL https://raw.githubusercontent.com/ayomidelog/AxonBrowser/main/install.sh | bash
+
 # Install from a local checkout
 scripts/install-axonbrowser.sh
 
-# Optional local browser installers used on this machine
+# Optional browser installers used on this machine
 scripts/install-chrome-local.sh
 scripts/install-firefox-local.sh
 scripts/install-edge-local.sh

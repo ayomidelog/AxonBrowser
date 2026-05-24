@@ -20,6 +20,9 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Check shell scripts
+        run: bash -n install.sh scripts/*.sh
+
       - name: Format
         run: cargo fmt --check
 

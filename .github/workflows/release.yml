@@ -59,29 +59,20 @@ jobs:
           . "$HOME/.cargo/env"
           cargo build --release --bins
 
-      - name: Assemble bundle
+      - name: Assemble release assets
         run: |
           set -euo pipefail
-          mkdir -p dist/bin dist/scripts
-          cp target/release/axonbrowser dist/bin/
-          cp target/release/axonbrowse dist/bin/
-          cp README.md dist/
-          cp scripts/install-axonbrowser.sh dist/scripts/
-          cp scripts/install-runtime-deps.sh dist/scripts/
-          cp scripts/install-chrome-local.sh dist/scripts/
-          cp scripts/install-firefox-local.sh dist/scripts/
-          cp scripts/install-edge-local.sh dist/scripts/
-          cp scripts/install-camoufox.sh dist/scripts/
-          tar -czf axonbrowser-linux-x86_64.tar.gz -C dist .
-          sha256sum axonbrowser-linux-x86_64.tar.gz > axonbrowser-linux-x86_64.tar.gz.sha256
+          . "$HOME/.cargo/env"
+          bash scripts/build-release-bundle.sh
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: axonbrowser-linux-x86_64
           path: |
-            axonbrowser-linux-x86_64.tar.gz
-            axonbrowser-linux-x86_64.tar.gz.sha256
+            dist/release/axonbrowser-linux-x86_64.tar.gz
+            dist/release/axonbrowser-linux-x86_64.tar.gz.sha256
+            dist/release/install.sh
 
       - name: Publish GitHub release assets
         if: startsWith(github.ref, 'refs/tags/')
@@ -89,5 +80,6 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            axonbrowser-linux-x86_64.tar.gz
-            axonbrowser-linux-x86_64.tar.gz.sha256
+            dist/release/axonbrowser-linux-x86_64.tar.gz
+            dist/release/axonbrowser-linux-x86_64.tar.gz.sha256
+            dist/release/install.sh

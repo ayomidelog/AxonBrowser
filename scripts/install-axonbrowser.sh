@@ -6,19 +6,16 @@ PREFIX="${PREFIX:-$HOME/.local}"
 BIN_DIR="$PREFIX/bin"
 mkdir -p "$BIN_DIR"
 
-if [[ -x "$ROOT/bin/axonbrowser" && -x "$ROOT/bin/axonbrowse" ]]; then
+if [[ -x "$ROOT/bin/axonbrowser" ]]; then
   cp "$ROOT/bin/axonbrowser" "$BIN_DIR/axonbrowser"
-  cp "$ROOT/bin/axonbrowse" "$BIN_DIR/axonbrowse"
-elif [[ -x "$ROOT/target/release/axonbrowser" && -x "$ROOT/target/release/axonbrowse" ]]; then
+elif [[ -x "$ROOT/target/release/axonbrowser" ]]; then
   cp "$ROOT/target/release/axonbrowser" "$BIN_DIR/axonbrowser"
-  cp "$ROOT/target/release/axonbrowse" "$BIN_DIR/axonbrowse"
 else
   cargo build --release
   cp "$ROOT/target/release/axonbrowser" "$BIN_DIR/axonbrowser"
-  cp "$ROOT/target/release/axonbrowse" "$BIN_DIR/axonbrowse"
 fi
 
-chmod +x "$BIN_DIR/axonbrowser" "$BIN_DIR/axonbrowse"
+chmod +x "$BIN_DIR/axonbrowser"
 
 "$ROOT/scripts/install-runtime-deps.sh"
 
