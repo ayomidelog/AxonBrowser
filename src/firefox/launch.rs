@@ -492,11 +492,11 @@ fn allocate_bidi_port() -> Result<u16> {
 }
 
 async fn bidi_ready_on_port(bidi_port: u16, url: &str) -> Result<Option<bidi::ContextInfo>> {
-    if let Ok(Some(current)) = bidi::current_context_on_port(bidi_port, Some(url)).await {
-        if !current.url.trim().is_empty() {
-            let _ = session::remember_browser_url(&current.url);
-            return Ok(Some(current));
-        }
+    if let Ok(Some(current)) = bidi::current_context_on_port(bidi_port, Some(url)).await
+        && !current.url.trim().is_empty()
+    {
+        let _ = session::remember_browser_url(&current.url);
+        return Ok(Some(current));
     }
     Ok(None)
 }
