@@ -1574,3 +1574,14 @@ fn map_browser_option_choice(
         BrowserOptionChoiceArg::Save => browser_options::BrowserOptionChoice::Save,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{map_scroll_to_key, BrowserScrollTargetArg};
+
+    #[test]
+    fn maps_scroll_to_targets_to_home_and_end() {
+        assert_eq!(map_scroll_to_key(BrowserScrollTargetArg::Top), "Home");
+        assert_eq!(map_scroll_to_key(BrowserScrollTargetArg::Bottom), "End");
+    }
+}

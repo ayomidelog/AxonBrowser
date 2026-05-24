@@ -56,8 +56,8 @@ pub async fn capture_mode(
             .with_context(|| format!("failed to create output directory {}", parent.display()))?;
     }
 
-    let capture = std::process::Command::new("import")
-        .args(["-window", &browser_window.id, output_path])
+    let capture = std::process::Command::new("timeout")
+        .args(["10s", "import", "-window", &browser_window.id, output_path])
         .output()
         .context("failed to run import")?;
 

@@ -70,17 +70,19 @@ pub async fn launch_and_wait(
     let log_path = unique_path("axonbrowser-chrome-launch", "log");
     let browser_binary = find_browser_binary()?;
     let pid = spawn_browser(&browser_binary, &profile_dir, &log_path, &url)?;
+    let _ = session::remember_browser_profile(&profile_dir.display().to_string());
+    let _ = session::remember_browser_url(&url);
 
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
     let interval = Duration::from_millis(poll_ms.max(1));
 
     loop {
-        if let Some(window) = find_window_for_pid(pid)? {
+        if let Some(window) = find_window_for_pid(pid)?
+            && devtools_ready(&url)?
+        {
             let _ = crate::window::activate_window(&window.id);
             let _ = session::remember_browser_window_target(&window.id);
-            let _ = session::remember_browser_url(&url);
-            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
             let _ = remember_initial_devtools_tab(&url);
             return Ok(ChromeLaunchState {
                 pid,
@@ -96,11 +98,11 @@ pub async fn launch_and_wait(
             });
         }
 
-        if let Some(window) = detect_new_window(&baseline)? {
+        if let Some(window) = detect_new_window(&baseline)?
+            && devtools_ready(&url)?
+        {
             let _ = crate::window::activate_window(&window.id);
             let _ = session::remember_browser_window_target(&window.id);
-            let _ = session::remember_browser_url(&url);
-            let _ = session::remember_browser_profile(&profile_dir.display().to_string());
             let _ = remember_initial_devtools_tab(&url);
             return Ok(ChromeLaunchState {
                 pid,
@@ -117,14 +119,15 @@ pub async fn launch_and_wait(
         }
 
         if start.elapsed() >= timeout {
-            if let Some(window) = chrome_window::list_browser_windows(None)?
-                .into_iter()
-                .next()
+            if let Some(window) = find_window_for_pid(pid)?.or_else(|| {
+                chrome_window::list_browser_windows(None)
+                    .ok()?
+                    .into_iter()
+                    .next()
+            }) && devtools_ready(&url)?
             {
                 let _ = crate::window::activate_window(&window.id);
                 let _ = session::remember_browser_window_target(&window.id);
-                let _ = session::remember_browser_url(&url);
-                let _ = session::remember_browser_profile(&profile_dir.display().to_string());
                 let _ = remember_initial_devtools_tab(&url);
                 return Ok(ChromeLaunchState {
                     pid,
@@ -139,6 +142,7 @@ pub async fn launch_and_wait(
                     height: window.height,
                 });
             }
+            session::clear_browser_session_state();
             bail!(
                 "timed out after {}ms waiting for a new chrome window; log: {}",
                 timeout_ms,
@@ -397,6 +401,15 @@ fn remember_initial_devtools_tab(url: &str) -> Result<()> {
         let _ = session::remember_browser_url(&page.url);
     }
     Ok(())
+}
+
+fn devtools_ready(url: &str) -> Result<bool> {
+    if let Some(page) = crate::chrome::devtools::current_page_with_hint(None, Some(url))? {
+        let _ = session::remember_browser_tab_target(&page.id);
+        let _ = session::remember_browser_url(&page.url);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

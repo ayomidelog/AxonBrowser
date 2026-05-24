@@ -86,10 +86,21 @@ pub fn current_title() -> Result<Option<String>> {
 }
 
 pub fn list_pages_for_session() -> Result<Vec<PageInfo>> {
-    let Some(port) = devtools_port()? else {
-        return Ok(Vec::new());
-    };
-    list_pages(port)
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    loop {
+        let Some(port) = devtools_port()? else {
+            if std::time::Instant::now() >= deadline {
+                return Ok(Vec::new());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
+        };
+        let pages = list_pages(port)?;
+        if !pages.is_empty() || std::time::Instant::now() >= deadline {
+            return Ok(pages);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 pub async fn navigate(
@@ -250,13 +261,12 @@ fn list_pages(port: u16) -> Result<Vec<PageInfo>> {
 }
 
 fn http_get_json(port: u16, path: &str) -> Result<String> {
-    let mut stream = TcpStream::connect(
-        ("127.0.0.1", port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| anyhow!("failed to resolve Edge DevTools address"))?,
-    )
-    .with_context(|| format!("failed connecting to Edge DevTools on port {}", port))?;
+    let addr = ("127.0.0.1", port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow!("failed to resolve Edge DevTools address"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+        .with_context(|| format!("failed connecting to Edge DevTools on port {}", port))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .context("failed to set Edge DevTools read timeout")?;

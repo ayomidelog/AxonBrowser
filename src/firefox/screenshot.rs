@@ -55,8 +55,8 @@ fn capture_window(output_path: &str, window: &crate::window::WindowMatch) -> Res
         fs::create_dir_all(parent)?;
     }
 
-    let capture = std::process::Command::new("import")
-        .args(["-window", &window.id, output_path])
+    let capture = std::process::Command::new("timeout")
+        .args(["10s", "import", "-window", &window.id, output_path])
         .output()?;
 
     if !capture.status.success() {

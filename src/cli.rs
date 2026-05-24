@@ -843,3 +843,51 @@ pub struct ChromeScreenshotArgs {
     #[arg(long)]
     pub active: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_scroll_to_for_all_browsers() {
+        let chrome = Cli::try_parse_from(["axonbrowser", "chrome", "scroll-to", "top"]).unwrap();
+        let edge = Cli::try_parse_from(["axonbrowser", "edge", "scroll-to", "bottom"]).unwrap();
+        let firefox =
+            Cli::try_parse_from(["axonbrowser", "firefox", "scroll-to", "top"]).unwrap();
+        let camoufox =
+            Cli::try_parse_from(["axonbrowser", "camoufox", "scroll-to", "bottom"]).unwrap();
+
+        assert!(matches!(
+            chrome.command,
+            Commands::Chrome(ChromeArgs {
+                command: ChromeCommands::ScrollTo(BrowserScrollToArgs {
+                    target: BrowserScrollTargetArg::Top
+                })
+            })
+        ));
+        assert!(matches!(
+            edge.command,
+            Commands::Edge(EdgeArgs {
+                command: EdgeCommands::ScrollTo(BrowserScrollToArgs {
+                    target: BrowserScrollTargetArg::Bottom
+                })
+            })
+        ));
+        assert!(matches!(
+            firefox.command,
+            Commands::Firefox(FirefoxArgs {
+                command: FirefoxCommands::ScrollTo(BrowserScrollToArgs {
+                    target: BrowserScrollTargetArg::Top
+                })
+            })
+        ));
+        assert!(matches!(
+            camoufox.command,
+            Commands::Firefox(FirefoxArgs {
+                command: FirefoxCommands::ScrollTo(BrowserScrollToArgs {
+                    target: BrowserScrollTargetArg::Bottom
+                })
+            })
+        ));
+    }
+}
