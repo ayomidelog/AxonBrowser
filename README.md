@@ -317,26 +317,38 @@ The demo site used for page smoke tests lives under `artifacts/page-test-site/`.
 ```
 src/
   main.rs                        entry point and command dispatch
+  bin/axonbrowse.rs              secondary binary shim
   cli.rs                         clap CLI definitions
+  browser_options.rs             browser popup matching helpers
+  live_access.rs                 AT-SPI read/write helpers
+  model.rs                       shared UI/tree data models
+  render.rs                      tree and locator rendering
+  runtime.rs                     headless session/bootstrap logic
   selector.rs                    selector parsing and matching
   chrome/                        Chrome/Chromium automation
-    launch.rs, attach.rs
-    goto.rs, current.rs
-    locators.rs, resize.rs
-    screenshot.rs
+    attach.rs, current.rs, devtools.rs
+    goto.rs, launch.rs, locators.rs, options.rs, resize.rs
+    retry.rs, screenshot.rs, session.rs, wait.rs, window.rs, windows.rs
     tabs/                        tab listing, switching, closing
-    actions/                     browser shell focus/click/type/key/hold
+    actions/                     browser shell focus/click/type/key/hold/scroll
     page/
-      find.rs, wait.rs
-      screenshot.rs
-      actions/                   click, type, form, scroll, upload, pointer
+      find.rs, flow.rs, root.rs, screenshot.rs, wait.rs
+      actions/                   click, focus, form, input, keys, physical, pointer, read, scroll, target, upload
   edge/                          Edge automation (mirrors chrome/)
-  firefox/                       Firefox automation (mirrors chrome/)
+    discovery.rs                  shared window/profile discovery helpers
+  firefox/                       Firefox/Camoufox automation (mirrors chrome/)
+    bidi.rs                       WebDriver BiDi session and tab handling
   inspect.rs                     AT-SPI tree inspection
   window.rs                      X11 window helpers
 scripts/
+  install-axonbrowser.sh
+  install-camoufox.sh
+  install-chrome-local.sh
+  install-edge-local.sh
+  install-firefox-local.sh
+  install-runtime-deps.sh
   use-vnc-session.sh
+  vnc-chrome-flow.sh
   vnc-chrome-smoke.sh
   vnc-page-smoke.sh
-  vnc-chrome-flow.sh
 ```
