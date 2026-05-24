@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::{
     browser_options, chrome,
     cli::{
-        BrowserOptionChoiceArg, BrowserOptionPromptArg, ChromeCommands, ChromePageCommand,
+        BrowserOptionChoiceArg, BrowserOptionPromptArg, BrowserScrollTargetArg, ChromeCommands, ChromePageCommand,
         ChromePageScrollDirectionArg, ChromePageStateArg, ChromeResizePresetArg, ChromeTabsCommand,
         ChromeWaitTarget, Cli, Commands, EdgeCommands, FirefoxCommands,
     },
@@ -103,6 +103,15 @@ pub async fn run(cli: Cli) -> Result<()> {
                 )
                 .await?;
                 println!("{}", summary);
+            }
+            EdgeCommands::ScrollTo(inner) => {
+                let window = edge::window::find_edge_window(None)?;
+                let activation_note = edge::actions::context::activate_window_note(&window.id);
+                crate::window::send_key(&window.id, map_scroll_to_key(inner.target))?;
+                println!(
+                    "scrolled page window {} to {:?} ({})",
+                    window.id, inner.target, activation_note
+                );
             }
             EdgeCommands::Wait(inner) => {
                 let summary = match inner.target {
@@ -621,6 +630,15 @@ pub async fn run(cli: Cli) -> Result<()> {
                 .await?;
                 println!("{}", summary);
             }
+            FirefoxCommands::ScrollTo(inner) => {
+                let window = firefox::window::find_firefox_window(None)?;
+                let activation_note = firefox::actions::context::activate_window_note(&window.id);
+                crate::window::send_key(&window.id, map_scroll_to_key(inner.target))?;
+                println!(
+                    "scrolled page window {} to {:?} ({})",
+                    window.id, inner.target, activation_note
+                );
+            }
             FirefoxCommands::Wait(inner) => {
                 let summary = match inner.target {
                     ChromeWaitTarget::Locator(wait) => {
@@ -1101,6 +1119,15 @@ pub async fn run(cli: Cli) -> Result<()> {
                 .await?;
                 println!("{}", summary);
             }
+            ChromeCommands::ScrollTo(inner) => {
+                let window = chrome::window::find_browser_window(None)?;
+                let activation_note = chrome::actions::context::activate_window_note(&window.id);
+                crate::window::send_key(&window.id, map_scroll_to_key(inner.target))?;
+                println!(
+                    "scrolled page window {} to {:?} ({})",
+                    window.id, inner.target, activation_note
+                );
+            }
             ChromeCommands::Goto(inner) => {
                 let summary = chrome::goto::navigate(
                     &inner.url,
@@ -1510,6 +1537,13 @@ fn map_page_scroll_direction(
         ChromePageScrollDirectionArg::Down => chrome::page::actions::PageScrollDirection::Down,
         ChromePageScrollDirectionArg::Left => chrome::page::actions::PageScrollDirection::Left,
         ChromePageScrollDirectionArg::Right => chrome::page::actions::PageScrollDirection::Right,
+    }
+}
+
+fn map_scroll_to_key(target: BrowserScrollTargetArg) -> &'static str {
+    match target {
+        BrowserScrollTargetArg::Top => "Home",
+        BrowserScrollTargetArg::Bottom => "End",
     }
 }
 

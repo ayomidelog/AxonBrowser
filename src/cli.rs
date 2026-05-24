@@ -105,6 +105,8 @@ pub enum FirefoxCommands {
     Hold(ChromeHoldArgs),
     /// Scroll the rendered page window.
     Scroll(BrowserScrollArgs),
+    /// Jump to the top or bottom of the rendered page.
+    ScrollTo(BrowserScrollToArgs),
     /// Wait for a locator, page title change, or URL change.
     Wait(ChromeWaitArgs),
     /// Navigate the current Firefox window by focusing the address bar, entering a URL, and pressing Enter.
@@ -155,6 +157,8 @@ pub enum EdgeCommands {
     Hold(ChromeHoldArgs),
     /// Scroll the rendered page window.
     Scroll(BrowserScrollArgs),
+    /// Jump to the top or bottom of the rendered page.
+    ScrollTo(BrowserScrollToArgs),
     /// Wait for a locator, page title change, or URL change.
     Wait(ChromeWaitArgs),
     /// Navigate the current Edge window by focusing the address bar, entering a URL, and pressing Enter.
@@ -205,6 +209,8 @@ pub enum ChromeCommands {
     Hold(ChromeHoldArgs),
     /// Scroll the rendered page window.
     Scroll(BrowserScrollArgs),
+    /// Jump to the top or bottom of the rendered page.
+    ScrollTo(BrowserScrollToArgs),
     /// Wait for a locator, page title change, or URL change.
     Wait(ChromeWaitArgs),
     /// Navigate the current Chrome window by focusing the address bar, entering a URL, and pressing Enter.
@@ -348,6 +354,19 @@ pub struct BrowserScrollArgs {
     /// Number of wheel steps.
     #[arg(long, default_value_t = 3)]
     pub amount: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct BrowserScrollToArgs {
+    /// Target page position.
+    #[arg(value_enum)]
+    pub target: BrowserScrollTargetArg,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum BrowserScrollTargetArg {
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, Args)]
