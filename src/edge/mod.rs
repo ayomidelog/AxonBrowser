@@ -1,8 +1,8 @@
 pub mod actions;
 pub mod attach;
 pub mod current;
-pub mod discovery;
 pub mod devtools;
+pub mod discovery;
 pub mod goto;
 pub mod launch;
 pub mod options;

@@ -127,9 +127,9 @@ pub async fn launch_and_wait_with_flavor(
 
     loop {
         if let Some(current) = bidi_ready_on_port(bidi_port, &url).await? {
-            let preferred =
-                choose_window_for_context(pid, &baseline, current.title.as_str())?;
-            if let Some(window_match) = preferred.or_else(|| find_window_for_pid(pid).ok().flatten())
+            let preferred = choose_window_for_context(pid, &baseline, current.title.as_str())?;
+            if let Some(window_match) =
+                preferred.or_else(|| find_window_for_pid(pid).ok().flatten())
             {
                 let _ = crate::window::activate_window(&window_match.id);
                 let _ = session::remember_browser_window_target(&window_match.id);
@@ -246,7 +246,12 @@ fn choose_window_for_context(
             let pid_match = crate::window::window_pid(&window_match.id)
                 .map(|window_pid| window_pid == pid)
                 .unwrap_or(false) as u8;
-            (title_match, is_new, pid_match, window_match.width * window_match.height)
+            (
+                title_match,
+                is_new,
+                pid_match,
+                window_match.width * window_match.height,
+            )
         }))
 }
 

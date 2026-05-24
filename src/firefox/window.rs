@@ -62,7 +62,10 @@ fn sort_key(window: &WindowMatch) -> (u8, u8, String) {
 
 fn is_firefox_window_name(name: &str) -> bool {
     let normalized = normalize(name);
-    FIREFOX_NEEDLES.iter().any(|needle| normalized.contains(needle)) && is_content_window_name(&normalized)
+    FIREFOX_NEEDLES
+        .iter()
+        .any(|needle| normalized.contains(needle))
+        && is_content_window_name(&normalized)
 }
 
 fn is_content_window_name(normalized: &str) -> bool {

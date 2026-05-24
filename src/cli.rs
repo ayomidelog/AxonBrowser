@@ -852,8 +852,7 @@ mod tests {
     fn parses_scroll_to_for_all_browsers() {
         let chrome = Cli::try_parse_from(["axonbrowser", "chrome", "scroll-to", "top"]).unwrap();
         let edge = Cli::try_parse_from(["axonbrowser", "edge", "scroll-to", "bottom"]).unwrap();
-        let firefox =
-            Cli::try_parse_from(["axonbrowser", "firefox", "scroll-to", "top"]).unwrap();
+        let firefox = Cli::try_parse_from(["axonbrowser", "firefox", "scroll-to", "top"]).unwrap();
         let camoufox =
             Cli::try_parse_from(["axonbrowser", "camoufox", "scroll-to", "bottom"]).unwrap();
 

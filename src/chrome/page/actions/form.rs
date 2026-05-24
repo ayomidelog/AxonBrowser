@@ -4,7 +4,10 @@ use anyhow::{Result, anyhow, bail};
 use atspi::State;
 use tokio::time::sleep;
 
-use crate::{chrome::{actions::click::click_target_node, page::root::PageScope}, selector};
+use crate::{
+    chrome::{actions::click::click_target_node, page::root::PageScope},
+    selector,
+};
 
 use super::target::PageActionTarget;
 

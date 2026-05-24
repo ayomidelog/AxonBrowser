@@ -3,9 +3,9 @@ use anyhow::Result;
 use crate::{
     browser_options, chrome,
     cli::{
-        BrowserOptionChoiceArg, BrowserOptionPromptArg, BrowserScrollTargetArg, ChromeCommands, ChromePageCommand,
-        ChromePageScrollDirectionArg, ChromePageStateArg, ChromeResizePresetArg, ChromeTabsCommand,
-        ChromeWaitTarget, Cli, Commands, EdgeCommands, FirefoxCommands,
+        BrowserOptionChoiceArg, BrowserOptionPromptArg, BrowserScrollTargetArg, ChromeCommands,
+        ChromePageCommand, ChromePageScrollDirectionArg, ChromePageStateArg, ChromeResizePresetArg,
+        ChromeTabsCommand, ChromeWaitTarget, Cli, Commands, EdgeCommands, FirefoxCommands,
     },
     edge, firefox, install, render,
 };
@@ -1577,7 +1577,7 @@ fn map_browser_option_choice(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_scroll_to_key, BrowserScrollTargetArg};
+    use super::{BrowserScrollTargetArg, map_scroll_to_key};
 
     #[test]
     fn maps_scroll_to_targets_to_home_and_end() {

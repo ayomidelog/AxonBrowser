@@ -38,7 +38,8 @@ mod tests {
 
     #[test]
     fn parses_profile_arg_from_cmdline() {
-        let cmdline = "/path/to/microsoft-edge --user-data-dir=/tmp/edge-profile --remote-debugging-port=0";
+        let cmdline =
+            "/path/to/microsoft-edge --user-data-dir=/tmp/edge-profile --remote-debugging-port=0";
         assert_eq!(
             parse_user_data_dir(cmdline).as_deref(),
             Some("/tmp/edge-profile")

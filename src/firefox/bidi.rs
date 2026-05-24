@@ -226,7 +226,10 @@ pub async fn activate_context_by_index(index: usize) -> Result<ContextInfo> {
             .await?;
         remember_context(&target)?;
         match client
-            .wait_for_current_context(|context| context.context == target.context, Duration::from_secs(2))
+            .wait_for_current_context(
+                |context| context.context == target.context,
+                Duration::from_secs(2),
+            )
             .await
         {
             Ok(settled) => {
@@ -260,7 +263,10 @@ pub async fn activate_context_by_title_contains(needle: &str) -> Result<ContextI
             .await?;
         remember_context(&target)?;
         match client
-            .wait_for_current_context(|context| context.context == target.context, Duration::from_secs(2))
+            .wait_for_current_context(
+                |context| context.context == target.context,
+                Duration::from_secs(2),
+            )
             .await
         {
             Ok(settled) => {
