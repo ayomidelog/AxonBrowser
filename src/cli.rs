@@ -103,6 +103,8 @@ pub enum FirefoxCommands {
     PressEnter(ChromePressEnterArgs),
     /// Hold a key down for a short duration in the browser window.
     Hold(ChromeHoldArgs),
+    /// Scroll the rendered page window.
+    Scroll(BrowserScrollArgs),
     /// Wait for a locator, page title change, or URL change.
     Wait(ChromeWaitArgs),
     /// Navigate the current Firefox window by focusing the address bar, entering a URL, and pressing Enter.
@@ -151,6 +153,8 @@ pub enum EdgeCommands {
     PressEnter(ChromePressEnterArgs),
     /// Hold a key down for a short duration in the browser window.
     Hold(ChromeHoldArgs),
+    /// Scroll the rendered page window.
+    Scroll(BrowserScrollArgs),
     /// Wait for a locator, page title change, or URL change.
     Wait(ChromeWaitArgs),
     /// Navigate the current Edge window by focusing the address bar, entering a URL, and pressing Enter.
@@ -199,6 +203,8 @@ pub enum ChromeCommands {
     PressEnter(ChromePressEnterArgs),
     /// Hold a key down for a short duration in the browser window.
     Hold(ChromeHoldArgs),
+    /// Scroll the rendered page window.
+    Scroll(BrowserScrollArgs),
     /// Wait for a locator, page title change, or URL change.
     Wait(ChromeWaitArgs),
     /// Navigate the current Chrome window by focusing the address bar, entering a URL, and pressing Enter.
@@ -331,6 +337,17 @@ pub struct ChromeGotoArgs {
     /// Poll interval in milliseconds while waiting for page-state change.
     #[arg(long, default_value_t = crate::chrome::wait::default_poll_ms())]
     pub poll_ms: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct BrowserScrollArgs {
+    /// Scroll direction.
+    #[arg(value_enum)]
+    pub direction: ChromePageScrollDirectionArg,
+
+    /// Number of wheel steps.
+    #[arg(long, default_value_t = 3)]
+    pub amount: u32,
 }
 
 #[derive(Debug, Args)]

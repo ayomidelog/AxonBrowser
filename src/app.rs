@@ -94,6 +94,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                         .await?;
                 println!("{}", summary);
             }
+            EdgeCommands::Scroll(inner) => {
+                let scope = edge::page::root::PageScope::default();
+                let summary = edge::page::actions::scroll_window(
+                    &scope,
+                    map_page_scroll_direction(inner.direction),
+                    inner.amount,
+                )
+                .await?;
+                println!("{}", summary);
+            }
             EdgeCommands::Wait(inner) => {
                 let summary = match inner.target {
                     ChromeWaitTarget::Locator(wait) => {
@@ -601,6 +611,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                         .await?;
                 println!("{}", summary);
             }
+            FirefoxCommands::Scroll(inner) => {
+                let scope = firefox::page::root::PageScope::default();
+                let summary = firefox::page::actions::scroll_window(
+                    &scope,
+                    map_page_scroll_direction_firefox(inner.direction),
+                    inner.amount,
+                )
+                .await?;
+                println!("{}", summary);
+            }
             FirefoxCommands::Wait(inner) => {
                 let summary = match inner.target {
                     ChromeWaitTarget::Locator(wait) => {
@@ -1069,6 +1089,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let summary =
                     chrome::actions::hold(&inner.key, inner.duration_ms, inner.locator.as_deref())
                         .await?;
+                println!("{}", summary);
+            }
+            ChromeCommands::Scroll(inner) => {
+                let scope = chrome::page::root::PageScope::default();
+                let summary = chrome::page::actions::scroll_window(
+                    &scope,
+                    map_page_scroll_direction(inner.direction),
+                    inner.amount,
+                )
+                .await?;
                 println!("{}", summary);
             }
             ChromeCommands::Goto(inner) => {

@@ -29,8 +29,12 @@ pub async fn scroll_window(
     direction: PageScrollDirection,
     amount: u32,
 ) -> Result<String> {
-    let root = crate::firefox::page::root::resolve_page_scope(scope).await?;
-    let browser_window = crate::firefox::actions::context::browser_window_for_node(&root).await?;
+    let browser_window = if scope.frame_selectors.is_empty() {
+        crate::firefox::window::find_firefox_window(None)?
+    } else {
+        let root = crate::firefox::page::root::resolve_page_scope(scope).await?;
+        crate::firefox::actions::context::browser_window_for_node(&root).await?
+    };
     let activation_note =
         crate::firefox::actions::context::activate_window_note(&browser_window.id);
     window::scroll(&browser_window.id, direction.to_window_direction(), amount)?;
