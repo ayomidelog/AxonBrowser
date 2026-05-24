@@ -24,8 +24,7 @@ pub async fn navigate(
                     "camoufox opened real tab {:?} ({}) via window.open",
                     context.title, context.url
                 );
-                let context =
-                    bidi::navigate(&url, title_before.as_deref(), Some("about:blank")).await?;
+                let context = bidi::navigate_context(&context.context, &url).await?;
                 format!(
                     "{} | bidi navigated tab {:?} to {:?}",
                     summary, context.title, url

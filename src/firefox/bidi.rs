@@ -84,6 +84,34 @@ pub async fn navigate(
     result
 }
 
+pub async fn navigate_context(context_id: &str, target_url: &str) -> Result<ContextInfo> {
+    let mut client = BidiSession::connect().await?;
+    client.start().await?;
+    let result = async {
+        client
+            .command(
+                "browsingContext.navigate",
+                json!({
+                    "context": context_id,
+                    "url": target_url,
+                    "wait": "complete"
+                }),
+            )
+            .await?;
+        let contexts = client.list_contexts().await?;
+        let updated = contexts
+            .into_iter()
+            .find(|context| context.context == context_id)
+            .ok_or_else(|| anyhow!("navigated Firefox context {} disappeared", context_id))?;
+        remember_context(&updated)?;
+        Ok(updated)
+    }
+    .await;
+    let end_result = client.end().await;
+    end_result?;
+    result
+}
+
 pub async fn new_context(target_url: &str) -> Result<ContextInfo> {
     new_context_with_type(target_url, "tab").await
 }
@@ -196,14 +224,17 @@ pub async fn activate_context_by_index(index: usize) -> Result<ContextInfo> {
                 json!({ "context": target.context.clone() }),
             )
             .await?;
-        let settled = client
-            .wait_for_current_context(
-                |context| canonical_url(&context.url) == canonical_url(&target.url),
-                Duration::from_secs(4),
-            )
-            .await?;
-        remember_context(&settled)?;
-        Ok(settled)
+        remember_context(&target)?;
+        match client
+            .wait_for_current_context(|context| context.context == target.context, Duration::from_secs(2))
+            .await
+        {
+            Ok(settled) => {
+                remember_context(&settled)?;
+                Ok(settled)
+            }
+            Err(_) => Ok(target),
+        }
     }
     .await;
     let end_result = client.end().await;
@@ -227,14 +258,17 @@ pub async fn activate_context_by_title_contains(needle: &str) -> Result<ContextI
                 json!({ "context": target.context.clone() }),
             )
             .await?;
-        let settled = client
-            .wait_for_current_context(
-                |context| canonical_url(&context.url) == canonical_url(&target.url),
-                Duration::from_secs(4),
-            )
-            .await?;
-        remember_context(&settled)?;
-        Ok(settled)
+        remember_context(&target)?;
+        match client
+            .wait_for_current_context(|context| context.context == target.context, Duration::from_secs(2))
+            .await
+        {
+            Ok(settled) => {
+                remember_context(&settled)?;
+                Ok(settled)
+            }
+            Err(_) => Ok(target),
+        }
     }
     .await;
     let end_result = client.end().await;
@@ -471,20 +505,7 @@ impl BidiSession {
             return Ok(listed);
         }
 
-        if !listed.iter().any(|context| context.is_current) {
-            if let Some(url) = session::read_browser_url()
-                && let Some(index) = listed
-                    .iter()
-                    .position(|context| canonical_url(&context.url) == canonical_url(&url))
-            {
-                for context in &mut listed {
-                    context.is_current = false;
-                }
-                listed[index].is_current = true;
-            } else {
-                listed[0].is_current = true;
-            }
-        }
+        normalize_current_contexts(&mut listed, self.last_current_context.as_ref());
 
         self.last_current_context = listed.iter().find(|context| context.is_current).cloned();
         Ok(listed)
@@ -673,6 +694,47 @@ pub async fn current_context_on_port(
 fn remember_context(context: &ContextInfo) -> Result<()> {
     let _ = session::remember_browser_url(&context.url);
     Ok(())
+}
+
+fn normalize_current_contexts(
+    listed: &mut [ContextInfo],
+    last_current_context: Option<&ContextInfo>,
+) {
+    if let Some(url) = session::read_browser_url()
+        && let Some(index) = listed
+            .iter()
+            .position(|context| canonical_url(&context.url) == canonical_url(&url))
+    {
+        for (i, context) in listed.iter_mut().enumerate() {
+            context.is_current = i == index;
+        }
+        return;
+    }
+
+    let current_count = listed.iter().filter(|context| context.is_current).count();
+    if current_count == 1 {
+        return;
+    }
+
+    let preferred_index = preferred_current_index(listed, last_current_context).unwrap_or(0);
+    for (index, context) in listed.iter_mut().enumerate() {
+        context.is_current = index == preferred_index;
+    }
+}
+
+fn preferred_current_index(
+    listed: &[ContextInfo],
+    last_current_context: Option<&ContextInfo>,
+) -> Option<usize> {
+    if let Some(last) = last_current_context
+        && let Some(index) = listed
+            .iter()
+            .position(|context| context.context == last.context)
+    {
+        return Some(index);
+    }
+
+    listed.iter().rposition(|context| context.is_current)
 }
 
 fn resolve_by_title_contains<'a>(
