@@ -9,8 +9,8 @@ Axonbrowser now runs in two layers:
 - rendered page interaction:
   - real accessibility/X11 actions through AT-SPI
 
-That means shell commands like `launch`, `current`, `goto`, `tabs`, and
-`screenshot` are browser-native, while page commands still do real clicks,
+That means shell commands like `launch`, `current`, `goto`, `tabs`, `scroll`,
+and `scroll-to` are browser-native, while page commands still do real clicks,
 typing, focus, waits, and reads against the live browser window.
 
 ---
@@ -99,10 +99,10 @@ The core browser commands are shared by all four browser entry points (`chrome`,
 `edge`, `firefox`, `camoufox`).
 
 Verified native shell coverage in the current tree:
-- Chrome: `launch`, `current`, `goto`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
-- Edge: `launch`, `current`, `goto`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
-- Firefox: `launch`, `current`, `goto`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
-- Camoufox: `launch`, `current`, `goto`, `goto --new-tab`, `new-tab`, `tabs list`, `tabs close`, `screenshot`
+- Chrome: `launch`, `current`, `goto`, `new-tab`, `scroll`, `scroll-to`, `tabs list`, `tabs close`, `screenshot`
+- Edge: `launch`, `current`, `goto`, `new-tab`, `scroll`, `scroll-to`, `tabs list`, `tabs close`, `screenshot`
+- Firefox: `launch`, `current`, `goto`, `new-tab`, `scroll`, `scroll-to`, `tabs list`, `tabs close`, `screenshot`
+- Camoufox: `launch`, `current`, `goto`, `goto --new-tab`, `new-tab`, `scroll`, `scroll-to`, `tabs list`, `tabs close`, `screenshot`
 
 ### Launch / attach
 
@@ -134,6 +134,14 @@ axonbrowser chrome resize --preset desktop    # 1440×900
 axonbrowser chrome resize --preset tablet     # 1024×768
 axonbrowser chrome resize --preset mobile     # 430×932
 axonbrowser chrome resize --width 1280 --height 900
+```
+
+### Scroll
+
+```bash
+axonbrowser chrome scroll down --amount 3
+axonbrowser chrome scroll-to top
+axonbrowser chrome scroll-to bottom
 ```
 
 ### Tabs
